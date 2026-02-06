@@ -209,15 +209,10 @@ jobs:
             # persists for the rest of the process lifetime.
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.MainActivityTest || true
 
-            # Preserve first run's test results to /tmp (second invocation cleans the output dir)
-            # Use find instead of glob to handle spaces in emulator directory names (e.g. "emulator-5554 - 12")
-            mkdir -p /tmp/test-results
-            find app/build/outputs/androidTest-results -name 'TEST-*.xml' -exec cp {} /tmp/test-results/ \; 2>/dev/null || true
+            # Preserve first run's entire results tree (second invocation cleans it)
+            cp -r app/build/outputs/androidTest-results /tmp/test-results-run1 2>/dev/null || true
 
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
-
-            # Also copy second run's results to /tmp
-            find app/build/outputs/androidTest-results -name 'TEST-*.xml' -exec cp {} /tmp/test-results/ \; 2>/dev/null || true
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug
@@ -246,7 +241,8 @@ jobs:
         run: |
           TOTAL=0
           FAILED=0
-          for f in /tmp/test-results/TEST-*.xml; do
+          # Parse results from both test runs (run1 saved to /tmp, run2 in gradle output)
+          for f in $(find /tmp/test-results-run1 app/build/outputs/androidTest-results -name 'TEST-*.xml' 2>/dev/null); do
             if [ -f "$f" ]; then
               T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
               F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
