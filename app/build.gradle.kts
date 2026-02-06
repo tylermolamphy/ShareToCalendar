@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tylermolamphy.sharetocalendar"
+        applicationId = "net.molamphy.tyler.sharetocal"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -55,6 +55,7 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     testImplementation("junit:junit:4.13.2")
 

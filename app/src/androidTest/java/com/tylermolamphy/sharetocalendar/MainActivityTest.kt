@@ -89,7 +89,7 @@ class MainActivityTest {
             composeTestRule.onNode(hasText("Title")).assertIsDisplayed()
             composeTestRule.onNode(hasText("Date")).performScrollTo().assertIsDisplayed()
             composeTestRule.onNode(hasText("Location")).performScrollTo().assertIsDisplayed()
-            composeTestRule.onNodeWithText("Save Event").performScrollTo().assertIsDisplayed()
+            composeTestRule.onNodeWithText("Save").assertIsDisplayed()
         }
     }
 
@@ -108,8 +108,8 @@ class MainActivityTest {
             // Wait for the confirm screen to be fully rendered and displayed
             waitUntilTagDisplayed("titleField")
 
-            composeTestRule.onNodeWithTag("saveButton").performScrollTo().assertIsDisplayed()
-            composeTestRule.onNodeWithTag("cancelButton").performScrollTo().assertIsDisplayed()
+            composeTestRule.onNodeWithTag("saveButton").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("cancelButton").assertIsDisplayed()
         }
     }
 }

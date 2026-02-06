@@ -19,16 +19,15 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -90,8 +89,19 @@ fun EventConfirmationScreen(
             TopAppBar(
                 title = { Text("Confirm Event") },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("cancelButton")
+                    ) {
                         Icon(Icons.Default.Close, contentDescription = "Cancel")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { viewModel.saveEvent() },
+                        modifier = Modifier.testTag("saveButton")
+                    ) {
+                        Text("Save")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -250,30 +260,6 @@ fun EventConfirmationScreen(
                 maxLines = 5
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("cancelButton")
-                ) {
-                    Text("Cancel")
-                }
-                Button(
-                    onClick = { viewModel.saveEvent() },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("saveButton")
-                ) {
-                    Text("Save Event")
-                }
-            }
         }
     }
 }
