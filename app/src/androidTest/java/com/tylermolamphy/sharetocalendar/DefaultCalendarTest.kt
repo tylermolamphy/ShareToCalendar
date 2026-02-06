@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.provider.CalendarContract
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
@@ -75,13 +76,14 @@ class DefaultCalendarTest {
     @Test
     fun settingsScreen_showsCalendarList() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            composeTestRule.waitForIdle()
+            // Wait for the calendar list to appear (async load from ContentResolver)
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText("Select default calendar")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
 
             // Top bar should say "Share to Calendar"
             composeTestRule.onNodeWithText("Share to Calendar").assertIsDisplayed()
-
-            // The "Select default calendar" heading should appear
-            composeTestRule.onNodeWithText("Select default calendar").assertIsDisplayed()
 
             // Our seeded calendar should be visible
             composeTestRule.onNodeWithText("CI Test Calendar").assertIsDisplayed()
@@ -91,11 +93,22 @@ class DefaultCalendarTest {
     @Test
     fun settingsScreen_selectDefaultCalendar() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            composeTestRule.waitForIdle()
+            // Wait for the calendar list to appear
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText("CI Test Calendar")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
 
             // Tap on the test calendar to select it
             composeTestRule.onNodeWithText("CI Test Calendar").performClick()
-            composeTestRule.waitForIdle()
+
+            // Wait for async DataStore write + Flow emission to update the UI
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText(
+                    "Events will be saved to \"CI Test Calendar\"",
+                    substring = false
+                ).fetchSemanticsNodes().isNotEmpty()
+            }
 
             // The confirmation card should now show the selected calendar
             composeTestRule.onNodeWithText(
