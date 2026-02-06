@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tylermolamphy.sharetocalendar.viewmodel.EventConfirmationViewModel
@@ -113,7 +114,9 @@ fun EventConfirmationScreen(
                 value = event.title,
                 onValueChange = { viewModel.updateEvent(event.copy(title = it)) },
                 label = { Text("Title") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("titleField"),
                 singleLine = true
             )
 
@@ -256,13 +259,17 @@ fun EventConfirmationScreen(
             ) {
                 OutlinedButton(
                     onClick = onDismiss,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("cancelButton")
                 ) {
                     Text("Cancel")
                 }
                 Button(
                     onClick = { viewModel.saveEvent() },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("saveButton")
                 ) {
                     Text("Save Event")
                 }
