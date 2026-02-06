@@ -221,12 +221,7 @@ jobs:
 
             # Wait for the app to render, then verify activity is in foreground
             sleep 3
-            for i in 1 2 3 4 5; do
-              if adb shell dumpsys activity activities | grep -q 'mResumedActivity.*sharetocalendar'; then
-                break
-              fi
-              sleep 2
-            done
+            for i in 1 2 3 4 5; do adb shell dumpsys activity activities | grep -q 'mResumedActivity.*sharetocalendar' && break || sleep 2; done
 
             # Take a screenshot
             adb exec-out screencap -p > screenshot.png
