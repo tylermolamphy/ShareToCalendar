@@ -209,10 +209,6 @@ private fun AboutSection() {
         Spacer(modifier = Modifier.width(12.dp))
         Column {
             Text(
-                text = "Share to Calendar",
-                style = MaterialTheme.typography.titleSmall
-            )
-            Text(
                 text = "by Tyler Molamphy",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
