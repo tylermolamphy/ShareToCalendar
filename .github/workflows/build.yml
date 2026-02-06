@@ -211,12 +211,13 @@ jobs:
 
             # Preserve first run's test results before second invocation cleans output dir
             mkdir -p /tmp/test-results
-            cp -r app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
+            cp app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
 
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
 
             # Merge first run's results back into the output directory
-            cp /tmp/test-results/TEST-*.xml app/build/outputs/androidTest-results/connected/*/ 2>/dev/null || true
+            RESULTS_DIR="$(ls -d app/build/outputs/androidTest-results/connected/*/ 2>/dev/null | head -1)"
+            if [ -n "$RESULTS_DIR" ]; then cp /tmp/test-results/TEST-*.xml "$RESULTS_DIR" 2>/dev/null || true; fi
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug
