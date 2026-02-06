@@ -203,17 +203,7 @@ jobs:
             adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
             # Seed a local test calendar so the app has something to display
-            adb shell content insert \
-              --uri content://com.android.calendar/calendars \
-              --bind name:s:MyCalendar \
-              --bind calendar_displayName:s:MyCalendar \
-              --bind calendar_color:i:-16711681 \
-              --bind calendar_accessLevel:i:700 \
-              --bind ownerAccount:s:test@local \
-              --bind account_name:s:test@local \
-              --bind account_type:s:LOCAL \
-              --bind sync_events:i:1 \
-              --bind visible:i:1
+            adb shell content insert --uri content://com.android.calendar/calendars --bind name:s:MyCalendar --bind calendar_displayName:s:MyCalendar --bind calendar_color:i:-16711681 --bind calendar_accessLevel:i:700 --bind ownerAccount:s:test@local --bind account_name:s:test@local --bind account_type:s:LOCAL --bind sync_events:i:1 --bind visible:i:1
 
             # Run instrumented tests (Gradle installs the APK itself)
             ./gradlew connectedDebugAndroidTest || true
