@@ -202,17 +202,22 @@ jobs:
             # Wait for emulator to be fully booted
             adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
+            # Extract applicationId from build.gradle.kts so CI doesn't hardcode it
+            APP_ID=$(grep 'applicationId' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+            NAMESPACE=$(grep 'namespace' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+            echo "APP_ID=$APP_ID  NAMESPACE=$NAMESPACE"
+
             # Run instrumented tests in two separate invocations.
             # MainActivityTest must run FIRST (without permissions) because revoking
             # dangerous permissions on API 31+ kills the app process, making in-process
             # revocation impossible. DefaultCalendarTest uses GrantPermissionRule which
             # persists for the rest of the process lifetime.
-            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.MainActivityTest || true
+            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=${NAMESPACE}.MainActivityTest || true
 
             # Preserve first run's entire results tree (second invocation cleans it)
             cp -r app/build/outputs/androidTest-results /tmp/test-results-run1 2>/dev/null || true
 
-            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
+            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=${NAMESPACE}.DefaultCalendarTest || true
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug
@@ -220,17 +225,31 @@ jobs:
             # Wake screen and dismiss keyguard
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
+            sleep 2
 
             # Grant calendar permissions so the app shows calendar list (not the permission prompt)
-            adb shell pm grant com.tylermolamphy.sharetocalendar android.permission.READ_CALENDAR
-            adb shell pm grant com.tylermolamphy.sharetocalendar android.permission.WRITE_CALENDAR
+            adb shell pm grant "$APP_ID" android.permission.READ_CALENDAR
+            adb shell pm grant "$APP_ID" android.permission.WRITE_CALENDAR
 
-            # Launch the app
-            adb shell am start -W -n com.tylermolamphy.sharetocalendar/.MainActivity
-
-            # Wait for the app to render, then verify activity is in foreground
+            # Launch the app using applicationId + fully qualified activity class
+            adb shell am start -W -n "$APP_ID/${NAMESPACE}.MainActivity"
             sleep 3
-            for i in 1 2 3 4 5; do adb shell dumpsys activity activities | grep -q 'mResumedActivity.*sharetocalendar' && break || sleep 2; done
+
+            # Verify the app activity is in the foreground; retry up to 5 times
+            for i in 1 2 3 4 5; do
+              RESUMED=$(adb shell dumpsys activity activities 2>/dev/null | grep 'mResumedActivity' || true)
+              echo "Attempt $i – mResumedActivity: $RESUMED"
+              echo "$RESUMED" | grep -q "$APP_ID" && break
+              # Re-launch in case it didn't stick
+              adb shell input keyevent KEYCODE_WAKEUP
+              adb shell wm dismiss-keyguard
+              adb shell am start -W -n "$APP_ID/${NAMESPACE}.MainActivity"
+              sleep 3
+            done
+
+            # Final verification — log the focused activity for debugging
+            echo "--- Final activity state ---"
+            adb shell dumpsys activity activities | grep -E 'mResumedActivity|mFocusedApp' || true
 
             # Take a screenshot
             adb exec-out screencap -p > screenshot.png
