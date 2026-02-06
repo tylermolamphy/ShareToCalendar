@@ -276,9 +276,6 @@ jobs:
             git push origin ci-screenshots --force
           fi
 
-          # Go back to the PR branch
-          git checkout ${{ github.head_ref }}
-
       - name: Update PR comment with screenshot & UI test results
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
