@@ -202,8 +202,21 @@ jobs:
             # Wait for emulator to be fully booted
             adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
-            # Run instrumented tests (Gradle installs the APK itself)
-            ./gradlew connectedDebugAndroidTest || true
+            # Run instrumented tests in two separate invocations.
+            # MainActivityTest must run FIRST (without permissions) because revoking
+            # dangerous permissions on API 31+ kills the app process, making in-process
+            # revocation impossible. DefaultCalendarTest uses GrantPermissionRule which
+            # persists for the rest of the process lifetime.
+            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.MainActivityTest || true
+
+            # Preserve first run's test results before second invocation cleans output dir
+            mkdir -p /tmp/test-results
+            cp -r app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
+
+            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
+
+            # Merge first run's results back into the output directory
+            cp /tmp/test-results/TEST-*.xml app/build/outputs/androidTest-results/connected/*/ 2>/dev/null || true
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug

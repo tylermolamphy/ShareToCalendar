@@ -1,7 +1,6 @@
 package com.tylermolamphy.sharetocalendar
 
 import android.content.Intent
-import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -11,35 +10,21 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/**
+ * Tests that run WITHOUT calendar permissions.
+ * Must be run in a separate instrumentation invocation from [DefaultCalendarTest]
+ * because revoking dangerous permissions on API 31+ kills the app process.
+ * The CI workflow runs this class first, before any permissions are granted.
+ */
 @RunWith(AndroidJUnit4::class)
 class MainActivityTest {
 
     @get:Rule
     val composeTestRule = createEmptyComposeRule()
-
-    @Before
-    fun revokeCalendarPermissions() {
-        // Revoke permissions before each test to ensure clean state.
-        // DefaultCalendarTest uses GrantPermissionRule which persists across the
-        // entire connectedDebugAndroidTest run, so we must explicitly revoke here.
-        // Use executeShellCommand instead of revokeRuntimePermission() because the
-        // latter can kill the app process on API 31+, crashing the instrumentation runner.
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        listOf(
-            "pm revoke com.tylermolamphy.sharetocalendar android.permission.READ_CALENDAR",
-            "pm revoke com.tylermolamphy.sharetocalendar android.permission.WRITE_CALENDAR"
-        ).forEach { cmd ->
-            automation.executeShellCommand(cmd).use { pfd ->
-                ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader().readText()
-            }
-        }
-    }
 
     /** Wait until a node with [text] is fully rendered and displayed. */
     private fun waitUntilDisplayed(text: String, timeoutMs: Long = 10_000) {
