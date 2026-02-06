@@ -183,12 +183,6 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Download APK artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: debug-apk
-          path: apk
-
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -208,11 +202,25 @@ jobs:
             # Wait for emulator to be fully booted
             adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
-            # Install the APK
-            adb install apk/app-debug.apk
+            # Seed a local test calendar so the app has something to display
+            adb shell content insert \
+              --uri content://com.android.calendar/calendars \
+              --bind name:s:MyCalendar \
+              --bind calendar_displayName:s:MyCalendar \
+              --bind calendar_color:i:-16711681 \
+              --bind calendar_accessLevel:i:700 \
+              --bind ownerAccount:s:test@local \
+              --bind account_name:s:test@local \
+              --bind account_type:s:LOCAL \
+              --bind sync_events:i:1 \
+              --bind visible:i:1
 
-            # Run instrumented tests
+            # Run instrumented tests (Gradle installs the APK itself)
             ./gradlew connectedDebugAndroidTest || true
+
+            # Grant calendar permissions so the app shows calendar list (not the permission prompt)
+            adb shell pm grant com.tylermolamphy.sharetocalendar android.permission.READ_CALENDAR
+            adb shell pm grant com.tylermolamphy.sharetocalendar android.permission.WRITE_CALENDAR
 
             # Launch the app
             adb shell am start -W -n com.tylermolamphy.sharetocalendar/.MainActivity
