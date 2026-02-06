@@ -241,8 +241,10 @@ jobs:
         run: |
           TOTAL=0
           FAILED=0
-          # Parse results from both test runs (run1 saved to /tmp, run2 in gradle output)
-          for f in $(find /tmp/test-results-run1 app/build/outputs/androidTest-results -name 'TEST-*.xml' 2>/dev/null); do
+          # Parse results from both test runs (run1 saved to /tmp, run2 in gradle output dir).
+          # Bash glob expansion is space-safe (unlike $(find ...)), critical for
+          # paths containing "emulator-5554 - 12".
+          for f in /tmp/test-results-run1/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
             if [ -f "$f" ]; then
               T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
               F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
