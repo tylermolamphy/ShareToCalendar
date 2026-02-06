@@ -210,13 +210,14 @@ jobs:
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.MainActivityTest || true
 
             # Preserve first run's test results to /tmp (second invocation cleans the output dir)
+            # Use find instead of glob to handle spaces in emulator directory names (e.g. "emulator-5554 - 12")
             mkdir -p /tmp/test-results
-            cp app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
+            find app/build/outputs/androidTest-results -name 'TEST-*.xml' -exec cp {} /tmp/test-results/ \; 2>/dev/null || true
 
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
 
             # Also copy second run's results to /tmp
-            cp app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
+            find app/build/outputs/androidTest-results -name 'TEST-*.xml' -exec cp {} /tmp/test-results/ \; 2>/dev/null || true
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug
