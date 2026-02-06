@@ -209,14 +209,14 @@ jobs:
             # persists for the rest of the process lifetime.
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.MainActivityTest || true
 
-            # Preserve first run's test results before second invocation cleans output dir
+            # Preserve first run's test results to /tmp (second invocation cleans the output dir)
             mkdir -p /tmp/test-results
             cp app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
 
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
 
-            # Merge first run's results back into the output directory (single line because emulator-runner executes each line in a separate shell)
-            RESULTS_DIR="$(ls -d app/build/outputs/androidTest-results/connected/*/ 2>/dev/null | head -1)" && [ -n "$RESULTS_DIR" ] && cp /tmp/test-results/TEST-*.xml "$RESULTS_DIR" 2>/dev/null || true
+            # Also copy second run's results to /tmp
+            cp app/build/outputs/androidTest-results/connected/*/TEST-*.xml /tmp/test-results/ 2>/dev/null || true
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug
@@ -245,7 +245,7 @@ jobs:
         run: |
           TOTAL=0
           FAILED=0
-          for f in app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
+          for f in /tmp/test-results/TEST-*.xml; do
             if [ -f "$f" ]; then
               T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
               F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
