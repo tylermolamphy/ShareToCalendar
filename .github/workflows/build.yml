@@ -215,9 +215,8 @@ jobs:
 
             ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tylermolamphy.sharetocalendar.DefaultCalendarTest || true
 
-            # Merge first run's results back into the output directory
-            RESULTS_DIR="$(ls -d app/build/outputs/androidTest-results/connected/*/ 2>/dev/null | head -1)"
-            if [ -n "$RESULTS_DIR" ]; then cp /tmp/test-results/TEST-*.xml "$RESULTS_DIR" 2>/dev/null || true; fi
+            # Merge first run's results back into the output directory (single line because emulator-runner executes each line in a separate shell)
+            RESULTS_DIR="$(ls -d app/build/outputs/androidTest-results/connected/*/ 2>/dev/null | head -1)" && [ -n "$RESULTS_DIR" ] && cp /tmp/test-results/TEST-*.xml "$RESULTS_DIR" 2>/dev/null || true
 
             # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
             ./gradlew installDebug
