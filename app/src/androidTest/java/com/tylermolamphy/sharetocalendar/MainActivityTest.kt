@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -82,11 +83,13 @@ class MainActivityTest {
             // Wait for the confirm screen to be fully rendered and displayed
             waitUntilDisplayed("Confirm Event")
 
-            // Verify the confirmation screen fields are displayed
+            // Verify the confirmation screen fields exist and can be scrolled to.
+            // On small emulator screens, fields below the fold aren't "displayed"
+            // until scrolled into view.
             composeTestRule.onNode(hasText("Title")).assertIsDisplayed()
-            composeTestRule.onNode(hasText("Date")).assertIsDisplayed()
-            composeTestRule.onNode(hasText("Location")).assertIsDisplayed()
-            composeTestRule.onNodeWithText("Save Event").assertIsDisplayed()
+            composeTestRule.onNode(hasText("Date")).performScrollTo().assertIsDisplayed()
+            composeTestRule.onNode(hasText("Location")).performScrollTo().assertIsDisplayed()
+            composeTestRule.onNodeWithText("Save Event").performScrollTo().assertIsDisplayed()
         }
     }
 
@@ -105,8 +108,8 @@ class MainActivityTest {
             // Wait for the confirm screen to be fully rendered and displayed
             waitUntilTagDisplayed("titleField")
 
-            composeTestRule.onNodeWithTag("saveButton").assertIsDisplayed()
-            composeTestRule.onNodeWithTag("cancelButton").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("saveButton").performScrollTo().assertIsDisplayed()
+            composeTestRule.onNodeWithTag("cancelButton").performScrollTo().assertIsDisplayed()
         }
     }
 }
