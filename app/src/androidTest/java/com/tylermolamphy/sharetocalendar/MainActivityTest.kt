@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ActivityScenario
@@ -23,6 +24,10 @@ class MainActivityTest {
     fun settingsScreen_displaysTopBar() {
         // Launch without a share intent — lands on settings screen
         ActivityScenario.launch(MainActivity::class.java).use {
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText("Share to Calendar")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
             composeTestRule.onNodeWithText("Share to Calendar").assertIsDisplayed()
         }
     }
@@ -31,6 +36,10 @@ class MainActivityTest {
     fun settingsScreen_showsPermissionRequest() {
         // Permission isn't granted in test, so the request UI should show
         ActivityScenario.launch(MainActivity::class.java).use {
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText("Calendar permission is required")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
             composeTestRule.onNodeWithText("Calendar permission is required").assertIsDisplayed()
             composeTestRule.onNodeWithText("Grant Permission").assertIsDisplayed()
         }
@@ -48,7 +57,11 @@ class MainActivityTest {
             putExtra(Intent.EXTRA_TEXT, "Team meeting at 3pm")
         }
         ActivityScenario.launch<MainActivity>(intent).use {
-            composeTestRule.waitForIdle()
+            // Wait for the confirm screen to fully render
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText("Confirm Event")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
 
             // Verify the confirmation screen is displayed
             composeTestRule.onNodeWithText("Confirm Event").assertIsDisplayed()
@@ -71,7 +84,11 @@ class MainActivityTest {
             putExtra(Intent.EXTRA_TEXT, "Lunch tomorrow at noon")
         }
         ActivityScenario.launch<MainActivity>(intent).use {
-            composeTestRule.waitForIdle()
+            // Wait for the confirm screen to fully render
+            composeTestRule.waitUntil(5000) {
+                composeTestRule.onAllNodesWithText("Confirm Event")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
 
             // Verify the confirmation screen elements are visible
             composeTestRule.onNodeWithTag("titleField").assertIsDisplayed()

@@ -202,11 +202,15 @@ jobs:
             # Wait for emulator to be fully booted
             adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
-            # Seed a local test calendar so the app has something to display
-            adb shell content insert --uri content://com.android.calendar/calendars --bind name:s:MyCalendar --bind calendar_displayName:s:MyCalendar --bind calendar_color:i:-16711681 --bind calendar_accessLevel:i:700 --bind ownerAccount:s:test@local --bind account_name:s:test@local --bind account_type:s:LOCAL --bind sync_events:i:1 --bind visible:i:1
-
             # Run instrumented tests (Gradle installs the APK itself)
             ./gradlew connectedDebugAndroidTest || true
+
+            # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
+            ./gradlew installDebug
+
+            # Wake screen and dismiss keyguard
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
 
             # Grant calendar permissions so the app shows calendar list (not the permission prompt)
             adb shell pm grant com.tylermolamphy.sharetocalendar android.permission.READ_CALENDAR
@@ -215,8 +219,14 @@ jobs:
             # Launch the app
             adb shell am start -W -n com.tylermolamphy.sharetocalendar/.MainActivity
 
-            # Wait for the app to render
-            sleep 5
+            # Wait for the app to render, then verify activity is in foreground
+            sleep 3
+            for i in 1 2 3 4 5; do
+              if adb shell dumpsys activity activities | grep -q 'mResumedActivity.*sharetocalendar'; then
+                break
+              fi
+              sleep 2
+            done
 
             # Take a screenshot
             adb exec-out screencap -p > screenshot.png

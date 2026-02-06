@@ -1,6 +1,9 @@
 package com.tylermolamphy.sharetocalendar.viewmodel
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tylermolamphy.sharetocalendar.data.CalendarRepository
@@ -26,6 +29,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val _permissionGranted = MutableStateFlow(false)
     val permissionGranted: StateFlow<Boolean> = _permissionGranted.asStateFlow()
+
+    init {
+        val ctx = getApplication<Application>()
+        val readGranted = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.READ_CALENDAR
+        ) == PackageManager.PERMISSION_GRANTED
+        val writeGranted = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.WRITE_CALENDAR
+        ) == PackageManager.PERMISSION_GRANTED
+        if (readGranted && writeGranted) {
+            _permissionGranted.value = true
+            loadCalendars()
+        }
+    }
 
     fun onPermissionResult(granted: Boolean) {
         _permissionGranted.value = granted
