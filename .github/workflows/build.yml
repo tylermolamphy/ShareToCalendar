@@ -18,6 +18,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Record build start time
+        id: timer
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -56,19 +60,53 @@ jobs:
         run: |
           TOTAL=0
           FAILED=0
+          TABLE_ROWS=""
+
           for f in app/build/test-results/*/TEST-*.xml; do
-            if [ -f "$f" ]; then
-              T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
-              F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
-              E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
-              TOTAL=$((TOTAL + T))
-              FAILED=$((FAILED + F + E))
-            fi
+            [ -f "$f" ] || continue
+
+            T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
+            F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
+            E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
+            TOTAL=$((TOTAL + ${T:-0}))
+            FAILED=$((FAILED + ${F:-0} + ${E:-0}))
+
+            # Extract suite name from <testsuite> element
+            SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
+            SHORT_SUITE="${SUITE##*.}"
+
+            # Add suite header row
+            TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
+
+            # Parse each <testcase> element
+            while IFS= read -r line; do
+              TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
+              TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
+              # Escape pipes in test names for Markdown
+              TC_NAME="${TC_NAME//|/\\|}"
+
+              # Self-closing /> means pass; otherwise has <failure> child
+              if echo "$line" | grep -q '/>'; then
+                TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
+              else
+                TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
+              fi
+            done < <(grep '<testcase ' "$f")
           done
+
           PASSED=$((TOTAL - FAILED))
           echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
           echo "passed=${PASSED}" >> "$GITHUB_OUTPUT"
           echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
+
+          # Output multiline table
+          {
+            echo "table<<ENDOFTABLE"
+            echo "| Status | Test | Duration |"
+            echo "|--------|------|----------|"
+            echo -e "${TABLE_ROWS}"
+            echo "ENDOFTABLE"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload debug APK
         if: success()
@@ -92,18 +130,43 @@ jobs:
             const apkSize = '${{ steps.apk.outputs.size }}' || 'N/A';
             const sha = context.sha.substring(0, 7);
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const artifactUrl = `${runUrl}/artifacts`;
+
+            // Build duration
+            const startTime = parseInt('${{ steps.timer.outputs.start }}', 10);
+            const elapsedSec = Math.floor(Date.now() / 1000) - startTime;
+            const mins = Math.floor(elapsedSec / 60);
+            const secs = elapsedSec % 60;
+            const duration = `${mins}m ${secs}s`;
+
+            // APK download link — use artifact ID for a direct link, fall back to run URL
+            const artifactId = '${{ steps.upload-apk.outputs.artifact-id }}';
+            const apkUrl = artifactId
+              ? `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`
+              : runUrl;
+
+            // Test detail table from bash step
+            const testTable = `${{ steps.tests.outputs.table }}`;
 
             let body = `## ${emoji} Build ${status}\n\n`;
             body += `| Metric | Result |\n|--------|--------|\n`;
             body += `| **Unit Tests** | ${passed}/${total} passed`;
-            if (failed > 0) body += ` (${failed} failed)`;
+            if (parseInt(failed, 10) > 0) body += ` (${failed} failed)`;
             body += ` |\n`;
+            body += `<!-- UI_TESTS_ROW -->\n`;
             if (status === 'success') {
               body += `| **APK Size** | ${apkSize} |\n`;
-              body += `| **APK Download** | [debug-apk](${artifactUrl}) |\n`;
+              body += `| **APK Download** | [debug-apk](${apkUrl}) |\n`;
             }
+            body += `| **Build Duration** | ${duration} |\n`;
             body += `| **Commit** | \`${sha}\` |\n`;
+
+            // Collapsible unit test details
+            const testEmoji = parseInt(failed, 10) > 0 ? '❌' : '✅';
+            body += `\n<details>\n`;
+            body += `<summary>${testEmoji} Unit Test Details (${passed}/${total} passed)</summary>\n\n`;
+            body += testTable + `\n`;
+            body += `</details>\n`;
+
             body += `\n> ⏳ Emulator tests & screenshot pending…\n`;
             body += `\n<sub>🤖 Generated by GitHub Actions</sub>`;
 
@@ -279,22 +342,48 @@ jobs:
         run: |
           TOTAL=0
           FAILED=0
+          TABLE_ROWS=""
+
           # Parse results from all test runs (run1 & run2 saved to /tmp, run3 in gradle output dir).
           # Bash glob expansion is space-safe (unlike $(find ...)), critical for
           # paths containing "emulator-5554 - 12".
           for f in /tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
-            if [ -f "$f" ]; then
-              T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
-              F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
-              E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
-              TOTAL=$((TOTAL + T))
-              FAILED=$((FAILED + F + E))
-            fi
+            [ -f "$f" ] || continue
+
+            T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
+            F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
+            E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
+            TOTAL=$((TOTAL + ${T:-0}))
+            FAILED=$((FAILED + ${F:-0} + ${E:-0}))
+
+            # Extract suite name from <testsuite> element
+            SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
+            SHORT_SUITE="${SUITE##*.}"
+
+            # Add suite header row
+            TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
+
+            # Parse each <testcase> element
+            while IFS= read -r line; do
+              TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
+              TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
+              # Escape pipes in test names for Markdown
+              TC_NAME="${TC_NAME//|/\\|}"
+
+              # Self-closing /> means pass; otherwise has <failure> child
+              if echo "$line" | grep -q '/>'; then
+                TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
+              else
+                TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
+              fi
+            done < <(grep '<testcase ' "$f")
           done
+
           PASSED=$((TOTAL - FAILED))
           echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
           echo "passed=${PASSED}" >> "$GITHUB_OUTPUT"
           echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
+
           if [ "$TOTAL" -eq 0 ]; then
             echo "status=⚠️ No tests found" >> "$GITHUB_OUTPUT"
           elif [ "$FAILED" -gt 0 ]; then
@@ -302,6 +391,15 @@ jobs:
           else
             echo "status=✅ ${PASSED}/${TOTAL} passed" >> "$GITHUB_OUTPUT"
           fi
+
+          # Output multiline table
+          {
+            echo "table<<ENDOFTABLE"
+            echo "| Status | Test | Duration |"
+            echo "|--------|------|----------|"
+            echo -e "${TABLE_ROWS}"
+            echo "ENDOFTABLE"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload screenshot
         if: always()
@@ -335,9 +433,10 @@ jobs:
         with:
           script: |
             const uiTestStatus = '${{ steps.ui-tests.outputs.status }}' || '⚠️ Unknown';
-            const sha = context.sha.substring(0, 7);
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const artifactUrl = `${runUrl}/artifacts`;
+            const uiTotal = '${{ steps.ui-tests.outputs.total }}';
+            const uiPassed = '${{ steps.ui-tests.outputs.passed }}';
+            const uiFailed = '${{ steps.ui-tests.outputs.failed }}';
+            const uiTestTable = `${{ steps.ui-tests.outputs.table }}`;
             const screenshotUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/screenshot.png`;
             const timestamp = new Date().getTime();
 
@@ -351,14 +450,25 @@ jobs:
               c.user.type === 'Bot' && c.body.includes('Generated by GitHub Actions')
             );
 
-            // Preserve the existing build section and append emulator results
             let existingBody = botComment ? botComment.body : '';
+
+            // Replace the UI_TESTS_ROW placeholder with actual UI test results
+            const uiTestRow = `| **UI Tests** | ${uiTestStatus} |`;
+            existingBody = existingBody.replace('<!-- UI_TESTS_ROW -->', uiTestRow);
+
             // Remove the "pending" line and the footer
             existingBody = existingBody.replace(/\n> ⏳ Emulator tests & screenshot pending…\n/, '\n');
             existingBody = existingBody.replace(/\n<sub>🤖 Generated by GitHub Actions<\/sub>/, '');
 
             let body = existingBody;
-            body += `| **UI Tests** | ${uiTestStatus} |\n`;
+
+            // Collapsible UI test details
+            const uiEmoji = parseInt(uiFailed, 10) > 0 ? '❌' : '✅';
+            body += `\n<details>\n`;
+            body += `<summary>${uiEmoji} UI Test Details (${uiPassed}/${uiTotal} passed)</summary>\n\n`;
+            body += uiTestTable + `\n`;
+            body += `</details>\n`;
+
             body += `\n### 📱 App Screenshot\n\n`;
             body += `![App Screenshot](${screenshotUrl}?t=${timestamp})\n`;
             body += `\n<sub>🤖 Generated by GitHub Actions</sub>`;
