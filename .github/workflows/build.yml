@@ -203,16 +203,21 @@ jobs:
           NAMESPACE=$(grep 'namespace' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
           echo "APP_ID=$APP_ID  NAMESPACE=$NAMESPACE"
 
-          # Run instrumented tests in two separate invocations.
-          # MainActivityTest must run FIRST (without permissions) because revoking
-          # dangerous permissions on API 31+ kills the app process, making in-process
-          # revocation impossible. DefaultCalendarTest uses GrantPermissionRule which
-          # persists for the rest of the process lifetime.
+          # Run instrumented tests in three separate invocations.
+          # MainActivityTest and DarkModeTest must run FIRST (without permissions)
+          # because revoking dangerous permissions on API 31+ kills the app process,
+          # making in-process revocation impossible. DefaultCalendarTest uses
+          # GrantPermissionRule which persists for the rest of the process lifetime.
           ./gradlew connectedDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.MainActivityTest" || true
 
-          # Preserve first run's entire results tree (second invocation cleans it)
+          # Preserve first run's entire results tree (subsequent invocations clean it)
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run1 2>/dev/null || true
+
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DarkModeTest" || true
+
+          cp -r app/build/outputs/androidTest-results /tmp/test-results-run2 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || true
@@ -274,10 +279,10 @@ jobs:
         run: |
           TOTAL=0
           FAILED=0
-          # Parse results from both test runs (run1 saved to /tmp, run2 in gradle output dir).
+          # Parse results from all test runs (run1 & run2 saved to /tmp, run3 in gradle output dir).
           # Bash glob expansion is space-safe (unlike $(find ...)), critical for
           # paths containing "emulator-5554 - 12".
-          for f in /tmp/test-results-run1/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
+          for f in /tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
             if [ -f "$f" ]; then
               T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
               F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
