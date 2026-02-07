@@ -5,6 +5,7 @@ import android.app.TimePickerDialog
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -152,30 +153,35 @@ fun EventConfirmationScreen(
             }
 
             // Date
-            OutlinedTextField(
-                value = event.startDate.format(dateFormatter),
-                onValueChange = {},
-                label = { Text("Date") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        DatePickerDialog(
-                            context,
-                            { _, year, month, day ->
-                                viewModel.updateEvent(
-                                    event.copy(startDate = LocalDate.of(year, month + 1, day))
-                                )
-                            },
-                            event.startDate.year,
-                            event.startDate.monthValue - 1,
-                            event.startDate.dayOfMonth
-                        ).show()
-                    },
-                readOnly = true,
-                trailingIcon = {
-                    Icon(Icons.Default.DateRange, contentDescription = "Pick date")
-                }
-            )
+            Box {
+                OutlinedTextField(
+                    value = event.startDate.format(dateFormatter),
+                    onValueChange = {},
+                    label = { Text("Date") },
+                    modifier = Modifier.fillMaxWidth(),
+                    readOnly = true,
+                    trailingIcon = {
+                        Icon(Icons.Default.DateRange, contentDescription = "Pick date")
+                    }
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable {
+                            DatePickerDialog(
+                                context,
+                                { _, year, month, day ->
+                                    viewModel.updateEvent(
+                                        event.copy(startDate = LocalDate.of(year, month + 1, day))
+                                    )
+                                },
+                                event.startDate.year,
+                                event.startDate.monthValue - 1,
+                                event.startDate.dayOfMonth
+                            ).show()
+                        }
+                )
+            }
 
             // Start / End time (only if not all-day)
             if (!event.isAllDay) {
@@ -183,57 +189,67 @@ fun EventConfirmationScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedTextField(
-                        value = event.startTime?.format(timeFormatter) ?: "",
-                        onValueChange = {},
-                        label = { Text("Start") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable {
-                                val st = event.startTime ?: LocalTime.of(9, 0)
-                                TimePickerDialog(
-                                    context,
-                                    { _, hour, minute ->
-                                        viewModel.updateEvent(
-                                            event.copy(startTime = LocalTime.of(hour, minute))
-                                        )
-                                    },
-                                    st.hour,
-                                    st.minute,
-                                    false
-                                ).show()
-                            },
-                        readOnly = true,
-                        trailingIcon = {
-                            Icon(Icons.Default.Schedule, contentDescription = "Pick start time")
-                        }
-                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = event.startTime?.format(timeFormatter) ?: "",
+                            onValueChange = {},
+                            label = { Text("Start") },
+                            modifier = Modifier.fillMaxWidth(),
+                            readOnly = true,
+                            trailingIcon = {
+                                Icon(Icons.Default.Schedule, contentDescription = "Pick start time")
+                            }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable {
+                                    val st = event.startTime ?: LocalTime.of(9, 0)
+                                    TimePickerDialog(
+                                        context,
+                                        { _, hour, minute ->
+                                            viewModel.updateEvent(
+                                                event.copy(startTime = LocalTime.of(hour, minute))
+                                            )
+                                        },
+                                        st.hour,
+                                        st.minute,
+                                        false
+                                    ).show()
+                                }
+                        )
+                    }
 
-                    OutlinedTextField(
-                        value = event.endTime?.format(timeFormatter) ?: "",
-                        onValueChange = {},
-                        label = { Text("End") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable {
-                                val et = event.endTime ?: event.startTime?.plusHours(1) ?: LocalTime.of(10, 0)
-                                TimePickerDialog(
-                                    context,
-                                    { _, hour, minute ->
-                                        viewModel.updateEvent(
-                                            event.copy(endTime = LocalTime.of(hour, minute))
-                                        )
-                                    },
-                                    et.hour,
-                                    et.minute,
-                                    false
-                                ).show()
-                            },
-                        readOnly = true,
-                        trailingIcon = {
-                            Icon(Icons.Default.Schedule, contentDescription = "Pick end time")
-                        }
-                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = event.endTime?.format(timeFormatter) ?: "",
+                            onValueChange = {},
+                            label = { Text("End") },
+                            modifier = Modifier.fillMaxWidth(),
+                            readOnly = true,
+                            trailingIcon = {
+                                Icon(Icons.Default.Schedule, contentDescription = "Pick end time")
+                            }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable {
+                                    val et = event.endTime ?: event.startTime?.plusHours(1) ?: LocalTime.of(10, 0)
+                                    TimePickerDialog(
+                                        context,
+                                        { _, hour, minute ->
+                                            viewModel.updateEvent(
+                                                event.copy(endTime = LocalTime.of(hour, minute))
+                                            )
+                                        },
+                                        et.hour,
+                                        et.minute,
+                                        false
+                                    ).show()
+                                }
+                        )
+                    }
                 }
             }
 

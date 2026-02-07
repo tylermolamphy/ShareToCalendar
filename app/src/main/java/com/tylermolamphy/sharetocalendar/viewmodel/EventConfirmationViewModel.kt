@@ -30,7 +30,20 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun parseSharedText(text: String) {
-        _event.value = NaturalLanguageParser.parse(text)
+        val parsed = NaturalLanguageParser.parse(text)
+        _event.value = parsed.copy(
+            title = shortenTitle(parsed.title),
+            description = text
+        )
+    }
+
+    private fun shortenTitle(title: String): String {
+        if (title.length <= 50) return title
+        // Take first sentence (split on . ! ?)
+        val firstSentence = title.split(Regex("[.!?]"), limit = 2).first().trim()
+        if (firstSentence.length <= 50) return firstSentence
+        // Still too long — truncate at word boundary + ellipsis
+        return firstSentence.take(47).substringBeforeLast(' ') + "…"
     }
 
     fun updateEvent(event: CalendarEvent) {
