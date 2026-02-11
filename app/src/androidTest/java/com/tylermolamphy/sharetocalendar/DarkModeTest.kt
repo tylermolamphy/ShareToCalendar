@@ -129,13 +129,19 @@ class DarkModeTest {
 
     @Test
     fun darkMode_isActive() {
-        // Sanity check: verify the device is actually in dark mode
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val nightMode = context.resources.configuration.uiMode and
-                Configuration.UI_MODE_NIGHT_MASK
-        assertTrue(
-            "Expected device to be in night mode",
-            nightMode == Configuration.UI_MODE_NIGHT_YES
-        )
+        // Sanity check: verify the app is actually rendering in dark mode.
+        // We must read the configuration from a launched Activity because
+        // setApplicationNightMode() only affects the app's local config,
+        // not the system-level uiMode returned by the instrumentation context.
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val nightMode = activity.resources.configuration.uiMode and
+                        Configuration.UI_MODE_NIGHT_MASK
+                assertTrue(
+                    "Expected device to be in night mode",
+                    nightMode == Configuration.UI_MODE_NIGHT_YES
+                )
+            }
+        }
     }
 }
