@@ -353,9 +353,7 @@ jobs:
           echo "Settings screenshot captured ($(wc -c < screenshot_settings.png) bytes)"
 
           # Screenshot 2: Share/Confirm screen
-          adb shell am start -W -n "$COMPONENT" \
-            -a android.intent.action.SEND -t "text/plain" \
-            --es android.intent.extra.TEXT "Lunch at 1pm"
+          adb shell "am start -W -n '${COMPONENT}' -a android.intent.action.SEND -t 'text/plain' --es android.intent.extra.TEXT 'Lunch at 1pm'"
           sleep 3
           adb exec-out screencap -p > screenshot_confirm.png
           echo "Confirm screenshot captured ($(wc -c < screenshot_confirm.png) bytes)"
