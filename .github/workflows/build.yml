@@ -309,6 +309,11 @@ jobs:
           ./gradlew connectedDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || true
 
+          cp -r app/build/outputs/androidTest-results /tmp/test-results-run3 2>/dev/null || true
+
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.ShareFlowTest" || true
+
           # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
           ./gradlew installDebug
 
@@ -368,10 +373,10 @@ jobs:
           FAILED=0
           TABLE_ROWS=""
 
-          # Parse results from all test runs (run1 & run2 saved to /tmp, run3 in gradle output dir).
+          # Parse results from all test runs (run1–run3 saved to /tmp, run4 in gradle output dir).
           # Bash glob expansion is space-safe (unlike $(find ...)), critical for
           # paths containing "emulator-5554 - 12".
-          for f in /tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
+          for f in /tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml /tmp/test-results-run3/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
             [ -f "$f" ] || continue
 
             T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
