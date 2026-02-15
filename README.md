@@ -1,30 +1,23 @@
-# ShareToCalendar
-
-Share text to create calendar events using natural language.
 
 ShareToCalendar is an Android app that registers as a share target so you can
 highlight text in any app, tap "Share", and instantly create a calendar event.
 A built-in natural language parser extracts the date, time, duration, location,
 and title from the shared text -- no external services required.
 
+⚠️ This is entirely AI generated code. It works well on my daily device, but be warned that it has not been tested beyond this, and is always subject to breaking changes. Consider yourself warned.
+
+
+## Download
+
+https://github.com/tylermolamphy/ShareToCalendar/releases
+
+
 ## Screenshots
 
-| Settings | Confirm Event |
+| Settings | Adding to Event |
 |:---:|:---:|
 | ![Settings screen](https://github.com/tylermolamphy/ShareToCalendar/raw/ci-screenshots/pr-16/screenshot_settings.png) | ![Confirm screen](https://github.com/tylermolamphy/ShareToCalendar/raw/ci-screenshots/pr-16/screenshot_confirm.png) |
 
-## Features
-
-- **Share intent integration** -- highlight text anywhere and share it directly
-  to your calendar
-- **Natural language parsing** -- a lightweight, offline regex-based parser
-  extracts event details from plain text
-- **Calendar integration** -- reads available calendars and inserts events via
-  the Android CalendarContract API
-- **Default calendar selection** -- pick your preferred calendar once in settings
-- **All-day and timed events** -- automatically creates an all-day event when no
-  time is specified
-- **Material 3 / Material You** -- follows your device theme including dark mode
 
 ## Supported Input Formats
 
@@ -58,37 +51,3 @@ The parser handles a wide range of natural language patterns:
 | Dentist appointment Jan 15 at 2:30pm | Jan 15, 14:30 - 15:30 |
 | Team offsite tomorrow | All-day event tomorrow |
 
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| Language | Kotlin 2.1 |
-| UI | Jetpack Compose (BOM 2024.12.01) |
-| Design system | Material 3 |
-| Navigation | Navigation Compose |
-| Persistence | DataStore Preferences |
-| Architecture | MVVM (ViewModel + Repository) |
-| Min SDK | 26 (Android 8.0) |
-| Target SDK | 35 (Android 15) |
-
-## Building
-
-Clone the repository and build with Gradle:
-
-```bash
-git clone https://github.com/tylermolamphy/ShareToCalendar.git
-cd ShareToCalendar
-./gradlew assembleDebug
-```
-
-The debug APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
-
-To run tests:
-
-```bash
-# Unit tests
-./gradlew test
-
-# Instrumented tests (requires a connected device or emulator)
-./gradlew connectedAndroidTest
-```
