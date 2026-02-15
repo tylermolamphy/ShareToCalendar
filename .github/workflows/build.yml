@@ -1,0 +1,445 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
+  pull_request:
+    branches: [ "main", "master" ]
+    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Record build start time
+        id: timer
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run unit tests & build debug APK
+        run: ./gradlew test assembleDebug
+
+      - name: Get APK size
+        id: apk
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
+          echo "size=${APK_SIZE}" >> "$GITHUB_OUTPUT"
+
+      - name: Get test results
+        if: "!cancelled()"
+        id: tests
+        run: bash .github/scripts/parse-test-results.sh 'app/build/test-results/testDebugUnitTest/TEST-*.xml'
+
+      - name: Upload debug APK
+        if: success()
+        id: upload-apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - name: Comment on PR (build results)
+        if: "!cancelled() && github.event_name == 'pull_request'"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}';
+            const emoji = status === 'success' ? '✅' : '❌';
+            const total = '${{ steps.tests.outputs.total }}';
+            const passed = '${{ steps.tests.outputs.passed }}';
+            const failed = '${{ steps.tests.outputs.failed }}';
+            const apkSize = '${{ steps.apk.outputs.size }}' || 'N/A';
+            const sha = context.sha.substring(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Build duration
+            const startTime = parseInt('${{ steps.timer.outputs.start }}', 10);
+            const elapsedSec = Math.floor(Date.now() / 1000) - startTime;
+            const mins = Math.floor(elapsedSec / 60);
+            const secs = elapsedSec % 60;
+            const duration = `${mins}m ${secs}s`;
+
+            // APK download link — use artifact ID for a direct link, fall back to run URL
+            const artifactId = '${{ steps.upload-apk.outputs.artifact-id }}';
+            const apkUrl = artifactId
+              ? `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`
+              : runUrl;
+
+            // Test detail table from bash step
+            const testTable = `${{ steps.tests.outputs.table }}`;
+
+            // Look up the build job URL and "Run unit tests" step number
+            let stepUrl = runUrl;
+            try {
+              const { data: { jobs } } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+              });
+              const buildJob = jobs.find(j => j.name.includes('build'));
+              if (buildJob) {
+                const step = buildJob.steps.find(s => s.name.includes('Run unit tests & build'));
+                if (step) {
+                  stepUrl = `${buildJob.html_url}#step:${step.number}:1`;
+                }
+              }
+            } catch (e) {
+              console.log('Could not look up job step URL:', e.message);
+            }
+
+            let body = `## ${emoji} Build ${status}\n\n`;
+            body += `| Metric | Result |\n|--------|--------|\n`;
+            body += `| **Unit Tests** | ${passed}/${total} passed`;
+            if (parseInt(failed, 10) > 0) body += ` (${failed} failed)`;
+            body += ` |\n`;
+            body += `<!-- UI_TESTS_ROW -->\n`;
+            if (status === 'success') {
+              body += `| **APK Size** | ${apkSize} |\n`;
+              body += `| **APK Download** | [debug-apk](${apkUrl}) |\n`;
+            }
+            body += `| **Build Duration** | ${duration} |\n`;
+            body += `| **Commit** | \`${sha}\` |\n`;
+
+            // Collapsible unit test details
+            const testEmoji = parseInt(failed, 10) > 0 ? '❌' : '✅';
+            body += `\n<details>\n`;
+            body += `<summary>${testEmoji} Unit Test Details (${passed}/${total} passed)</summary>\n\n`;
+            body += testTable + `\n`;
+            body += `</details>\n`;
+
+            body += `\n> ⏳ Emulator tests & screenshot pending…\n`;
+            body += `\n<sub>🤖 Generated by GitHub Actions</sub>`;
+
+            // Link ❌ emoji to the unit test step log
+            body = body.replace(/❌/g, `[❌](${stepUrl})`);
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Generated by GitHub Actions')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Generate version tag
+        if: github.event_name == 'push'
+        id: version
+        run: |
+          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          BUILD_NUM=${{ github.run_number }}
+          TAG="v${VERSION}-build.${BUILD_NUM}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Build ${{ steps.version.outputs.tag }}"
+          body: |
+            Automated build from commit ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+          files: app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: true
+
+  emulator:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Write emulator test script
+        run: |
+          cat > /tmp/emulator-test.sh << 'EMUSCRIPT'
+          #!/usr/bin/env bash
+          set -x
+
+          # Wait for emulator to be fully booted
+          adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
+
+          # Extract applicationId and namespace from build.gradle.kts
+          APP_ID=$(grep 'applicationId' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+          NAMESPACE=$(grep 'namespace' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+          echo "APP_ID=$APP_ID  NAMESPACE=$NAMESPACE"
+
+          # Run instrumented tests in three separate invocations.
+          # MainActivityTest and DarkModeTest must run FIRST (without permissions)
+          # because revoking dangerous permissions on API 31+ kills the app process,
+          # making in-process revocation impossible. DefaultCalendarTest uses
+          # GrantPermissionRule which persists for the rest of the process lifetime.
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.MainActivityTest" || true
+
+          # Preserve first run's entire results tree (subsequent invocations clean it)
+          cp -r app/build/outputs/androidTest-results /tmp/test-results-run1 2>/dev/null || true
+
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DarkModeTest" || true
+
+          cp -r app/build/outputs/androidTest-results /tmp/test-results-run2 2>/dev/null || true
+
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || true
+
+          cp -r app/build/outputs/androidTest-results /tmp/test-results-run3 2>/dev/null || true
+
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.ShareFlowTest" || true
+
+          # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
+          ./gradlew installDebug
+
+          # Wake screen and dismiss keyguard
+          adb shell input keyevent KEYCODE_WAKEUP
+          adb shell wm dismiss-keyguard
+          sleep 2
+
+          # Grant calendar permissions so the app shows calendar list (not the permission prompt)
+          adb shell pm grant "$APP_ID" android.permission.READ_CALENDAR
+          adb shell pm grant "$APP_ID" android.permission.WRITE_CALENDAR
+
+          # Launch the app using applicationId + fully qualified activity class
+          COMPONENT="${APP_ID}/${NAMESPACE}.MainActivity"
+          echo "Launching component: $COMPONENT"
+          adb shell am start -W -n "$COMPONENT"
+          sleep 3
+
+          # Verify the app activity is in the foreground; retry up to 5 times
+          for i in 1 2 3 4 5; do
+            RESUMED=$(adb shell dumpsys activity activities 2>/dev/null | grep 'mResumedActivity' || true)
+            echo "Attempt $i – mResumedActivity: $RESUMED"
+            echo "$RESUMED" | grep -q "$APP_ID" && break
+            # Re-launch in case it didn't stick
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            adb shell am start -W -n "$COMPONENT"
+            sleep 3
+          done
+
+          # Final verification — log the focused activity for debugging
+          echo "--- Final activity state ---"
+          adb shell dumpsys activity activities | grep -E 'mResumedActivity|mFocusedApp' || true
+
+          # Screenshot 1: Settings screen (already launched and verified in foreground)
+          adb exec-out screencap -p > screenshot_settings.png
+          echo "Settings screenshot captured ($(wc -c < screenshot_settings.png) bytes)"
+
+          # Screenshot 2: Share/Confirm screen
+          adb shell "am start -W -n '${COMPONENT}' -a android.intent.action.SEND -t 'text/plain' --es android.intent.extra.TEXT 'Lunch at 1pm'"
+          sleep 3
+          adb exec-out screencap -p > screenshot_confirm.png
+          echo "Confirm screenshot captured ($(wc -c < screenshot_confirm.png) bytes)"
+          EMUSCRIPT
+          chmod +x /tmp/emulator-test.sh
+
+      - name: Run emulator tests & capture screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash /tmp/emulator-test.sh
+
+      - name: Get instrumented test results
+        if: "!cancelled()"
+        id: ui-tests
+        run: |
+          bash .github/scripts/parse-test-results.sh \
+            '/tmp/test-results-run1/connected/*/TEST-*.xml' \
+            '/tmp/test-results-run2/connected/*/TEST-*.xml' \
+            '/tmp/test-results-run3/connected/*/TEST-*.xml' \
+            'app/build/outputs/androidTest-results/connected/*/TEST-*.xml'
+
+      - name: Upload screenshots
+        if: "!cancelled()"
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-screenshots
+          path: screenshot_*.png
+          retention-days: 14
+
+      - name: Push screenshots to ci-screenshots branch
+        if: "!cancelled() && hashFiles('screenshot_settings.png') != ''"
+        run: |
+          PR_NUM=${{ github.event.pull_request.number }}
+          PR_DIR="pr-${PR_NUM}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Save screenshots before switching branches
+          cp ${{ github.workspace }}/screenshot_settings.png /tmp/screenshot_settings.png 2>/dev/null || true
+          cp ${{ github.workspace }}/screenshot_confirm.png /tmp/screenshot_confirm.png 2>/dev/null || true
+
+          # Fetch and checkout ci-screenshots if it exists, otherwise create orphan
+          git fetch origin ci-screenshots 2>/dev/null && git checkout ci-screenshots || git checkout --orphan ci-screenshots
+
+          # Create PR-specific directory (preserves other PRs' screenshots)
+          mkdir -p "${PR_DIR}"
+          cp /tmp/screenshot_settings.png "${PR_DIR}/screenshot_settings.png" 2>/dev/null || true
+          cp /tmp/screenshot_confirm.png "${PR_DIR}/screenshot_confirm.png" 2>/dev/null || true
+
+          # If at least one screenshot exists, commit and push
+          if [ -f "${PR_DIR}/screenshot_settings.png" ] || [ -f "${PR_DIR}/screenshot_confirm.png" ]; then
+            git add "${PR_DIR}" 2>/dev/null || true
+            git commit -m "Update screenshots for PR #${PR_NUM} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git push origin ci-screenshots --force
+          fi
+
+      - name: Update PR comment with screenshot & UI test results
+        if: "!cancelled() && github.event_name == 'pull_request'"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const uiTestStatus = '${{ steps.ui-tests.outputs.status }}' || '⚠️ Unknown';
+            const uiTotal = '${{ steps.ui-tests.outputs.total }}';
+            const uiPassed = '${{ steps.ui-tests.outputs.passed }}';
+            const uiFailed = '${{ steps.ui-tests.outputs.failed }}';
+            const uiTestTable = `${{ steps.ui-tests.outputs.table }}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const prNum = context.issue.number;
+            const settingsUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/pr-${prNum}/screenshot_settings.png`;
+            const confirmUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/pr-${prNum}/screenshot_confirm.png`;
+            const timestamp = new Date().getTime();
+
+            // Look up the emulator job URL and test step number
+            let emulatorStepUrl = runUrl;
+            try {
+              const { data: { jobs } } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+              });
+              const emulatorJob = jobs.find(j => j.name.includes('emulator'));
+              if (emulatorJob) {
+                const step = emulatorJob.steps.find(s => s.name.includes('Run emulator tests'));
+                if (step) {
+                  emulatorStepUrl = `${emulatorJob.html_url}#step:${step.number}:1`;
+                }
+              }
+            } catch (e) {
+              console.log('Could not look up emulator job step URL:', e.message);
+            }
+
+            // Fetch build job info from the existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Generated by GitHub Actions')
+            );
+
+            let existingBody = botComment ? botComment.body : '';
+
+            // Replace the UI_TESTS_ROW placeholder with actual UI test results
+            const uiTestRow = `| **UI Tests** | ${uiTestStatus} |`;
+            existingBody = existingBody.replace('<!-- UI_TESTS_ROW -->', uiTestRow);
+
+            // Remove the "pending" line and the footer
+            existingBody = existingBody.replace(/\n> ⏳ Emulator tests & screenshot pending…\n/, '\n');
+            existingBody = existingBody.replace(/\n<sub>🤖 Generated by GitHub Actions<\/sub>/, '');
+
+            let body = existingBody;
+
+            // Collapsible UI test details
+            const uiEmoji = parseInt(uiFailed, 10) > 0 ? '❌' : '✅';
+            body += `\n<details>\n`;
+            body += `<summary>${uiEmoji} UI Test Details (${uiPassed}/${uiTotal} passed)</summary>\n\n`;
+            body += uiTestTable + `\n`;
+            body += `</details>\n`;
+
+            body += `\n### 📱 App Screenshots\n\n`;
+            body += `| Settings | Share Confirmation |\n`;
+            body += `|:--------:|:------------------:|\n`;
+            body += `| ![Settings](${settingsUrl}?t=${timestamp}) | ![Confirm](${confirmUrl}?t=${timestamp}) |\n`;
+            body += `\n<sub>🤖 Generated by GitHub Actions</sub>`;
+
+            // Link bare ❌ emoji to the emulator test step log
+            // Use negative lookbehind to skip ❌ already linked by the build job
+            body = body.replace(/(?<!\[)❌/g, `[❌](${emulatorStepUrl})`);
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
