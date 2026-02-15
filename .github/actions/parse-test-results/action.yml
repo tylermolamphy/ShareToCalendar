@@ -1,0 +1,89 @@
+name: 'Parse JUnit Test Results'
+description: 'Parse JUnit XML files and output summary + markdown table'
+
+inputs:
+  results-glob:
+    description: 'Glob pattern(s) for JUnit XML files (space-separated)'
+    required: true
+
+outputs:
+  total:
+    description: 'Total number of tests'
+    value: ${{ steps.parse.outputs.total }}
+  passed:
+    description: 'Number of passed tests'
+    value: ${{ steps.parse.outputs.passed }}
+  failed:
+    description: 'Number of failed tests'
+    value: ${{ steps.parse.outputs.failed }}
+  status:
+    description: 'Human-readable status string with emoji'
+    value: ${{ steps.parse.outputs.status }}
+  table:
+    description: 'Markdown table of test results'
+    value: ${{ steps.parse.outputs.table }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Parse test results
+      id: parse
+      shell: bash
+      run: |
+        TOTAL=0
+        FAILED=0
+        TABLE_ROWS=""
+
+        for f in ${{ inputs.results-glob }}; do
+          [ -f "$f" ] || continue
+
+          T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
+          F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
+          E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
+          TOTAL=$((TOTAL + ${T:-0}))
+          FAILED=$((FAILED + ${F:-0} + ${E:-0}))
+
+          # Extract suite name from <testsuite> element
+          SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
+          SHORT_SUITE="${SUITE##*.}"
+
+          # Add suite header row
+          TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
+
+          # Parse each <testcase> element
+          while IFS= read -r line; do
+            TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
+            TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
+            # Escape pipes in test names for Markdown
+            TC_NAME="${TC_NAME//|/\\|}"
+
+            # Self-closing /> means pass; otherwise has <failure> child
+            if echo "$line" | grep -q '/>'; then
+              TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
+            else
+              TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
+            fi
+          done < <(grep '<testcase ' "$f")
+        done
+
+        PASSED=$((TOTAL - FAILED))
+        echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+        echo "passed=${PASSED}" >> "$GITHUB_OUTPUT"
+        echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
+
+        if [ "$TOTAL" -eq 0 ]; then
+          echo "status=⚠️ No tests found" >> "$GITHUB_OUTPUT"
+        elif [ "$FAILED" -gt 0 ]; then
+          echo "status=❌ ${PASSED}/${TOTAL} passed (${FAILED} failed)" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=✅ ${PASSED}/${TOTAL} passed" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Output multiline table
+        {
+          echo "table<<ENDOFTABLE"
+          echo "| Status | Test | Duration |"
+          echo "|--------|------|----------|"
+          echo -e "${TABLE_ROWS}"
+          echo "ENDOFTABLE"
+        } >> "$GITHUB_OUTPUT"
