@@ -200,7 +200,7 @@ jobs:
   emulator:
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     timeout-minutes: 30
 
     steps:
@@ -364,6 +364,27 @@ jobs:
           if [ -f "${PR_DIR}/screenshot_settings.png" ] || [ -f "${PR_DIR}/screenshot_confirm.png" ]; then
             git add "${PR_DIR}" 2>/dev/null || true
             git commit -m "Update screenshots for PR #${PR_NUM} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git push origin ci-screenshots --force
+          fi
+
+      - name: Update latest screenshots for README
+        if: always() && github.event_name == 'push' && hashFiles('screenshot_settings.png') != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          cp ${{ github.workspace }}/screenshot_settings.png /tmp/screenshot_settings.png 2>/dev/null || true
+          cp ${{ github.workspace }}/screenshot_confirm.png /tmp/screenshot_confirm.png 2>/dev/null || true
+
+          git fetch origin ci-screenshots 2>/dev/null && git checkout ci-screenshots || git checkout --orphan ci-screenshots
+
+          mkdir -p latest
+          cp /tmp/screenshot_settings.png latest/screenshot_settings.png 2>/dev/null || true
+          cp /tmp/screenshot_confirm.png latest/screenshot_confirm.png 2>/dev/null || true
+
+          if [ -f latest/screenshot_settings.png ] || [ -f latest/screenshot_confirm.png ]; then
+            git add latest 2>/dev/null || true
+            git commit -m "Update latest screenshots from main ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
             git push origin ci-screenshots --force
           fi
 
