@@ -3,10 +3,8 @@ name: Build & Release
 on:
   push:
     branches: [ "main", "master" ]
-    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
   pull_request:
     branches: [ "main", "master" ]
-    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -16,10 +14,6 @@ permissions:
   actions: read
   contents: write
   pull-requests: write
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
