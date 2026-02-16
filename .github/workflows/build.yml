@@ -3,8 +3,10 @@ name: Build & Release
 on:
   push:
     branches: [ "main", "master" ]
+    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
   pull_request:
     branches: [ "main", "master" ]
+    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -14,6 +16,10 @@ permissions:
   actions: read
   contents: write
   pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -32,25 +38,13 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          cache: 'gradle'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run unit tests
-        run: ./gradlew test
-
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
+      - name: Run unit tests & build debug APK
+        run: ./gradlew test assembleDebug
 
       - name: Run Android lint
         run: ./gradlew lintDebug
@@ -71,7 +65,7 @@ jobs:
           echo "size=${APK_SIZE}" >> "$GITHUB_OUTPUT"
 
       - name: Get test results
-        if: always()
+        if: "!cancelled()"
         id: tests
         uses: ./.github/actions/parse-test-results
         with:
@@ -87,7 +81,7 @@ jobs:
           retention-days: 14
 
       - name: Comment on PR (build results)
-        if: always() && github.event_name == 'pull_request'
+        if: "!cancelled() && github.event_name == 'pull_request'"
         uses: actions/github-script@v7
         with:
           script: |
@@ -127,7 +121,7 @@ jobs:
               });
               const buildJob = jobs.find(j => j.name.includes('build'));
               if (buildJob) {
-                const step = buildJob.steps.find(s => s.name.includes('Run unit tests'));
+                const step = buildJob.steps.find(s => s.name.includes('Run unit tests & build'));
                 if (step) {
                   stepUrl = `${buildJob.html_url}#step:${step.number}:1`;
                 }
@@ -224,16 +218,7 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          cache: 'gradle'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -346,14 +331,14 @@ jobs:
           script: bash /tmp/emulator-test.sh
 
       - name: Get instrumented test results
-        if: always()
+        if: "!cancelled()"
         id: ui-tests
         uses: ./.github/actions/parse-test-results
         with:
           results-glob: "/tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml /tmp/test-results-run3/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml"
 
       - name: Upload screenshots
-        if: always()
+        if: "!cancelled()"
         uses: actions/upload-artifact@v4
         with:
           name: emulator-screenshots
@@ -361,7 +346,7 @@ jobs:
           retention-days: 14
 
       - name: Push screenshots to ci-screenshots branch
-        if: always() && hashFiles('screenshot_settings.png') != ''
+        if: "!cancelled() && hashFiles('screenshot_settings.png') != ''"
         run: |
           PR_NUM=${{ github.event.pull_request.number }}
           PR_DIR="pr-${PR_NUM}"
@@ -389,7 +374,7 @@ jobs:
           fi
 
       - name: Update PR comment with screenshot & UI test results
-        if: always() && github.event_name == 'pull_request'
+        if: "!cancelled() && github.event_name == 'pull_request'"
         uses: actions/github-script@v7
         with:
           script: |
