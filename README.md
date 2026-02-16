@@ -16,7 +16,7 @@ https://github.com/tylermolamphy/ShareToCalendar/releases
 
 | Settings | Adding to Event |
 |:---:|:---:|
-| ![Settings screen](https://github.com/tylermolamphy/ShareToCalendar/raw/ci-screenshots/pr-16/screenshot_settings.png) | ![Confirm screen](https://github.com/tylermolamphy/ShareToCalendar/raw/ci-screenshots/pr-16/screenshot_confirm.png) |
+| ![Settings screen](https://github.com/tylermolamphy/ShareToCalendar/raw/ci-screenshots/latest/screenshot_settings.png) | ![Confirm screen](https://github.com/tylermolamphy/ShareToCalendar/raw/ci-screenshots/latest/screenshot_confirm.png) |
 
 
 ## Supported Input Formats
