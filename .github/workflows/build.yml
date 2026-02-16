@@ -3,19 +3,17 @@ name: Build & Release
 on:
   push:
     branches: [ "main", "master" ]
-    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
   pull_request:
     branches: [ "main", "master" ]
-    paths-ignore: ['*.md', 'LICENSE', '.gitignore', 'docs/**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   actions: read
   contents: write
   pull-requests: write
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -42,6 +40,17 @@ jobs:
       - name: Run unit tests & build debug APK
         run: ./gradlew test assembleDebug
 
+      - name: Run Android lint
+        run: ./gradlew lintDebug
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 14
+
       - name: Get APK size
         id: apk
         run: |
@@ -52,7 +61,9 @@ jobs:
       - name: Get test results
         if: "!cancelled()"
         id: tests
-        run: bash .github/scripts/parse-test-results.sh 'app/build/test-results/testDebugUnitTest/TEST-*.xml'
+        uses: ./.github/actions/parse-test-results
+        with:
+          results-glob: app/build/test-results/testDebugUnitTest/TEST-*.xml
 
       - name: Upload debug APK
         if: success()
@@ -90,7 +101,7 @@ jobs:
               ? `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`
               : runUrl;
 
-            // Test detail table from bash step
+            // Test detail table from composite action
             const testTable = `${{ steps.tests.outputs.table }}`;
 
             // Look up the build job URL and "Run unit tests" step number
@@ -218,6 +229,9 @@ jobs:
           #!/usr/bin/env bash
           set -x
 
+          # Track test exit codes — run all classes, fail at the end if any failed
+          EXIT=0
+
           # Wait for emulator to be fully booted
           adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
@@ -226,29 +240,29 @@ jobs:
           NAMESPACE=$(grep 'namespace' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
           echo "APP_ID=$APP_ID  NAMESPACE=$NAMESPACE"
 
-          # Run instrumented tests in three separate invocations.
+          # Run instrumented tests in separate invocations.
           # MainActivityTest and DarkModeTest must run FIRST (without permissions)
           # because revoking dangerous permissions on API 31+ kills the app process,
           # making in-process revocation impossible. DefaultCalendarTest uses
           # GrantPermissionRule which persists for the rest of the process lifetime.
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.MainActivityTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.MainActivityTest" || EXIT=1
 
           # Preserve first run's entire results tree (subsequent invocations clean it)
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run1 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DarkModeTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DarkModeTest" || EXIT=1
 
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run2 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || EXIT=1
 
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run3 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.ShareFlowTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.ShareFlowTest" || EXIT=1
 
           # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
           ./gradlew installDebug
@@ -293,6 +307,9 @@ jobs:
           sleep 3
           adb exec-out screencap -p > screenshot_confirm.png
           echo "Confirm screenshot captured ($(wc -c < screenshot_confirm.png) bytes)"
+
+          # Fail the step if any test run failed (after screenshots are captured)
+          exit $EXIT
           EMUSCRIPT
           chmod +x /tmp/emulator-test.sh
 
@@ -310,12 +327,9 @@ jobs:
       - name: Get instrumented test results
         if: "!cancelled()"
         id: ui-tests
-        run: |
-          bash .github/scripts/parse-test-results.sh \
-            '/tmp/test-results-run1/connected/*/TEST-*.xml' \
-            '/tmp/test-results-run2/connected/*/TEST-*.xml' \
-            '/tmp/test-results-run3/connected/*/TEST-*.xml' \
-            'app/build/outputs/androidTest-results/connected/*/TEST-*.xml'
+        uses: ./.github/actions/parse-test-results
+        with:
+          results-glob: "/tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml /tmp/test-results-run3/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml"
 
       - name: Upload screenshots
         if: "!cancelled()"
