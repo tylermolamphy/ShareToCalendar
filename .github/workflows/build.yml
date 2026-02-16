@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "main", "master" ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: write
@@ -48,6 +52,17 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
+      - name: Run Android lint
+        run: ./gradlew lintDebug
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 14
+
       - name: Get APK size
         id: apk
         run: |
@@ -58,56 +73,9 @@ jobs:
       - name: Get test results
         if: always()
         id: tests
-        run: |
-          TOTAL=0
-          FAILED=0
-          TABLE_ROWS=""
-
-          for f in app/build/test-results/testDebugUnitTest/TEST-*.xml; do
-            [ -f "$f" ] || continue
-
-            T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
-            F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
-            E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
-            TOTAL=$((TOTAL + ${T:-0}))
-            FAILED=$((FAILED + ${F:-0} + ${E:-0}))
-
-            # Extract suite name from <testsuite> element
-            SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
-            SHORT_SUITE="${SUITE##*.}"
-
-            # Add suite header row
-            TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
-
-            # Parse each <testcase> element
-            while IFS= read -r line; do
-              TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
-              TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
-              # Escape pipes in test names for Markdown
-              TC_NAME="${TC_NAME//|/\\|}"
-
-              # Self-closing /> means pass; otherwise has <failure> child
-              if echo "$line" | grep -q '/>'; then
-                TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
-              else
-                TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
-              fi
-            done < <(grep '<testcase ' "$f")
-          done
-
-          PASSED=$((TOTAL - FAILED))
-          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
-          echo "passed=${PASSED}" >> "$GITHUB_OUTPUT"
-          echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
-
-          # Output multiline table
-          {
-            echo "table<<ENDOFTABLE"
-            echo "| Status | Test | Duration |"
-            echo "|--------|------|----------|"
-            echo -e "${TABLE_ROWS}"
-            echo "ENDOFTABLE"
-          } >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/parse-test-results
+        with:
+          results-glob: app/build/test-results/testDebugUnitTest/TEST-*.xml
 
       - name: Upload debug APK
         if: success()
@@ -145,7 +113,7 @@ jobs:
               ? `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifactId}`
               : runUrl;
 
-            // Test detail table from bash step
+            // Test detail table from composite action
             const testTable = `${{ steps.tests.outputs.table }}`;
 
             // Look up the build job URL and "Run unit tests" step number
@@ -282,6 +250,9 @@ jobs:
           #!/usr/bin/env bash
           set -x
 
+          # Track test exit codes — run all classes, fail at the end if any failed
+          EXIT=0
+
           # Wait for emulator to be fully booted
           adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
@@ -290,29 +261,29 @@ jobs:
           NAMESPACE=$(grep 'namespace' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
           echo "APP_ID=$APP_ID  NAMESPACE=$NAMESPACE"
 
-          # Run instrumented tests in three separate invocations.
+          # Run instrumented tests in separate invocations.
           # MainActivityTest and DarkModeTest must run FIRST (without permissions)
           # because revoking dangerous permissions on API 31+ kills the app process,
           # making in-process revocation impossible. DefaultCalendarTest uses
           # GrantPermissionRule which persists for the rest of the process lifetime.
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.MainActivityTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.MainActivityTest" || EXIT=1
 
           # Preserve first run's entire results tree (subsequent invocations clean it)
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run1 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DarkModeTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DarkModeTest" || EXIT=1
 
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run2 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.DefaultCalendarTest" || EXIT=1
 
           cp -r app/build/outputs/androidTest-results /tmp/test-results-run3 2>/dev/null || true
 
           ./gradlew connectedDebugAndroidTest \
-            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.ShareFlowTest" || true
+            -Pandroid.testInstrumentationRunnerArguments.class="${NAMESPACE}.ShareFlowTest" || EXIT=1
 
           # connectedDebugAndroidTest uninstalls the APK after running, so reinstall it
           ./gradlew installDebug
@@ -357,6 +328,9 @@ jobs:
           sleep 3
           adb exec-out screencap -p > screenshot_confirm.png
           echo "Confirm screenshot captured ($(wc -c < screenshot_confirm.png) bytes)"
+
+          # Fail the step if any test run failed (after screenshots are captured)
+          exit $EXIT
           EMUSCRIPT
           chmod +x /tmp/emulator-test.sh
 
@@ -374,67 +348,9 @@ jobs:
       - name: Get instrumented test results
         if: always()
         id: ui-tests
-        run: |
-          TOTAL=0
-          FAILED=0
-          TABLE_ROWS=""
-
-          # Parse results from all test runs (run1–run3 saved to /tmp, run4 in gradle output dir).
-          # Bash glob expansion is space-safe (unlike $(find ...)), critical for
-          # paths containing "emulator-5554 - 12".
-          for f in /tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml /tmp/test-results-run3/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
-            [ -f "$f" ] || continue
-
-            T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
-            F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
-            E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
-            TOTAL=$((TOTAL + ${T:-0}))
-            FAILED=$((FAILED + ${F:-0} + ${E:-0}))
-
-            # Extract suite name from <testsuite> element
-            SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
-            SHORT_SUITE="${SUITE##*.}"
-
-            # Add suite header row
-            TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
-
-            # Parse each <testcase> element
-            while IFS= read -r line; do
-              TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
-              TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
-              # Escape pipes in test names for Markdown
-              TC_NAME="${TC_NAME//|/\\|}"
-
-              # Self-closing /> means pass; otherwise has <failure> child
-              if echo "$line" | grep -q '/>'; then
-                TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
-              else
-                TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
-              fi
-            done < <(grep '<testcase ' "$f")
-          done
-
-          PASSED=$((TOTAL - FAILED))
-          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
-          echo "passed=${PASSED}" >> "$GITHUB_OUTPUT"
-          echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
-
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "status=⚠️ No tests found" >> "$GITHUB_OUTPUT"
-          elif [ "$FAILED" -gt 0 ]; then
-            echo "status=❌ ${PASSED}/${TOTAL} passed (${FAILED} failed)" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=✅ ${PASSED}/${TOTAL} passed" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Output multiline table
-          {
-            echo "table<<ENDOFTABLE"
-            echo "| Status | Test | Duration |"
-            echo "|--------|------|----------|"
-            echo -e "${TABLE_ROWS}"
-            echo "ENDOFTABLE"
-          } >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/parse-test-results
+        with:
+          results-glob: "/tmp/test-results-run1/connected/*/TEST-*.xml /tmp/test-results-run2/connected/*/TEST-*.xml /tmp/test-results-run3/connected/*/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml"
 
       - name: Upload screenshots
         if: always()
@@ -447,19 +363,28 @@ jobs:
       - name: Push screenshots to ci-screenshots branch
         if: always() && hashFiles('screenshot_settings.png') != ''
         run: |
+          PR_NUM=${{ github.event.pull_request.number }}
+          PR_DIR="pr-${PR_NUM}"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create or update orphan branch
-          git checkout --orphan ci-screenshots || git checkout ci-screenshots
-          git rm -rf . 2>/dev/null || true
-          cp ${{ github.workspace }}/screenshot_settings.png screenshot_settings.png 2>/dev/null || true
-          cp ${{ github.workspace }}/screenshot_confirm.png screenshot_confirm.png 2>/dev/null || true
+          # Save screenshots before switching branches
+          cp ${{ github.workspace }}/screenshot_settings.png /tmp/screenshot_settings.png 2>/dev/null || true
+          cp ${{ github.workspace }}/screenshot_confirm.png /tmp/screenshot_confirm.png 2>/dev/null || true
+
+          # Fetch and checkout ci-screenshots if it exists, otherwise create orphan
+          git fetch origin ci-screenshots 2>/dev/null && git checkout ci-screenshots || git checkout --orphan ci-screenshots
+
+          # Create PR-specific directory (preserves other PRs' screenshots)
+          mkdir -p "${PR_DIR}"
+          cp /tmp/screenshot_settings.png "${PR_DIR}/screenshot_settings.png" 2>/dev/null || true
+          cp /tmp/screenshot_confirm.png "${PR_DIR}/screenshot_confirm.png" 2>/dev/null || true
 
           # If at least one screenshot exists, commit and push
-          if [ -f screenshot_settings.png ] || [ -f screenshot_confirm.png ]; then
-            git add screenshot_settings.png screenshot_confirm.png 2>/dev/null || true
-            git commit -m "Update screenshots from PR #${{ github.event.pull_request.number }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          if [ -f "${PR_DIR}/screenshot_settings.png" ] || [ -f "${PR_DIR}/screenshot_confirm.png" ]; then
+            git add "${PR_DIR}" 2>/dev/null || true
+            git commit -m "Update screenshots for PR #${PR_NUM} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
             git push origin ci-screenshots --force
           fi
 
@@ -474,8 +399,9 @@ jobs:
             const uiFailed = '${{ steps.ui-tests.outputs.failed }}';
             const uiTestTable = `${{ steps.ui-tests.outputs.table }}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const settingsUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/screenshot_settings.png`;
-            const confirmUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/screenshot_confirm.png`;
+            const prNum = context.issue.number;
+            const settingsUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/pr-${prNum}/screenshot_settings.png`;
+            const confirmUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/ci-screenshots/pr-${prNum}/screenshot_confirm.png`;
             const timestamp = new Date().getTime();
 
             // Look up the emulator job URL and test step number
