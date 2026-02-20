@@ -1,6 +1,7 @@
 package com.tylermolamphy.sharetocalendar
 
 import android.content.Intent
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -90,6 +91,35 @@ class MainActivityTest {
             composeTestRule.onNode(hasText("Date")).performScrollTo().assertIsDisplayed()
             composeTestRule.onNode(hasText("Location")).performScrollTo().assertIsDisplayed()
             composeTestRule.onNodeWithText("Save").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun shareIntent_titleIsFocusedOnOpen() {
+        // When a share intent launches the confirm screen, the title field should be
+        // automatically focused and the soft keyboard should be raised — verified by
+        // asserting focus state on the title node after the screen renders.
+        val intent = Intent(
+            ApplicationProvider.getApplicationContext(),
+            MainActivity::class.java
+        ).apply {
+            action = Intent.ACTION_SEND
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Team meeting at 3pm")
+        }
+        ActivityScenario.launch<MainActivity>(intent).use {
+            waitUntilDisplayed("Confirm Event")
+
+            // Poll until the title field reports focused (the LaunchedEffect has a 100 ms delay)
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                try {
+                    composeTestRule.onNodeWithTag("titleField").assertIsFocused()
+                    true
+                } catch (_: AssertionError) {
+                    false
+                }
+            }
+            composeTestRule.onNodeWithTag("titleField").assertIsFocused()
         }
     }
 
