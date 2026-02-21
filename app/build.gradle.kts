@@ -8,18 +8,39 @@ android {
     namespace = "com.tylermolamphy.sharetocalendar"
     compileSdk = 35
 
+    val versionCodeProp  = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+    val keystorePath     = System.getenv("KEYSTORE_PATH")
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val keyAliasProp     = System.getenv("KEY_ALIAS")
+    val keyPasswordProp  = System.getenv("KEY_PASSWORD")
+
     defaultConfig {
         applicationId = "net.molamphy.tyler.sharetocal"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = versionCodeProp
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (keystorePath != null && keystorePassword != null &&
+            keyAliasProp != null && keyPasswordProp != null) {
+            create("release") {
+                storeFile     = file(keystorePath)
+                storePassword = keystorePassword
+                keyAlias      = keyAliasProp
+                keyPassword   = keyPasswordProp
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // signingConfig is null when env vars are absent (local/PR builds); that's intentional.
+            // CI sets all four env vars and gets a properly signed APK.
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
