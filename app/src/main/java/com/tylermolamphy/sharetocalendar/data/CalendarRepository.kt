@@ -7,10 +7,12 @@ import com.tylermolamphy.sharetocalendar.model.CalendarEvent
 import com.tylermolamphy.sharetocalendar.model.CalendarInfo
 import java.time.ZoneId
 import java.util.TimeZone
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class CalendarRepository(private val contentResolver: ContentResolver) {
 
-    fun getCalendars(): List<CalendarInfo> {
+    suspend fun getCalendars(): List<CalendarInfo> = withContext(Dispatchers.IO) {
         val calendars = mutableListOf<CalendarInfo>()
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
@@ -37,10 +39,10 @@ class CalendarRepository(private val contentResolver: ContentResolver) {
                 )
             }
         }
-        return calendars
+        calendars
     }
 
-    fun insertEvent(calendarId: Long, event: CalendarEvent): Long? {
+    suspend fun insertEvent(calendarId: Long, event: CalendarEvent): Long? = withContext(Dispatchers.IO) {
         val timeZone = TimeZone.getDefault().id
         val zoneId = ZoneId.systemDefault()
 
@@ -84,6 +86,6 @@ class CalendarRepository(private val contentResolver: ContentResolver) {
         }
 
         val uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
-        return uri?.lastPathSegment?.toLongOrNull()
+        uri?.lastPathSegment?.toLongOrNull()
     }
 }

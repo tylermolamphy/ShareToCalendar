@@ -16,8 +16,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -58,6 +58,9 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
+
+private val DATE_FORMATTER = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
+private val TIME_FORMATTER = DateTimeFormatter.ofPattern("h:mm a")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,8 +114,8 @@ fun EventConfirmationScreen(
         }
     }
 
-    val dateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
-    val timeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+    val dateFormatter = DATE_FORMATTER
+    val timeFormatter = TIME_FORMATTER
 
     // M3 Date Picker Dialog
     if (showDatePicker) {
@@ -271,7 +274,7 @@ fun EventConfirmationScreen(
                             modifier = Modifier.fillMaxWidth(),
                             readOnly = true,
                             trailingIcon = {
-                                Icon(Icons.Default.Schedule, contentDescription = "Pick start time")
+                                Icon(Icons.Default.Edit, contentDescription = "Pick start time")
                             }
                         )
                         Box(
@@ -289,7 +292,7 @@ fun EventConfirmationScreen(
                             modifier = Modifier.fillMaxWidth(),
                             readOnly = true,
                             trailingIcon = {
-                                Icon(Icons.Default.Schedule, contentDescription = "Pick end time")
+                                Icon(Icons.Default.Edit, contentDescription = "Pick end time")
                             }
                         )
                         Box(

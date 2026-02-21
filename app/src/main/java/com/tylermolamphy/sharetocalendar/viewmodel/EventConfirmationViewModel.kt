@@ -7,13 +7,14 @@ import com.tylermolamphy.sharetocalendar.data.CalendarRepository
 import com.tylermolamphy.sharetocalendar.data.PreferencesRepository
 import com.tylermolamphy.sharetocalendar.model.CalendarEvent
 import com.tylermolamphy.sharetocalendar.parser.NaturalLanguageParser
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class EventConfirmationViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -30,11 +31,15 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun parseSharedText(text: String) {
-        val parsed = NaturalLanguageParser.parse(text)
-        _event.value = parsed.copy(
-            title = shortenTitle(parsed.title),
-            description = text
-        )
+        viewModelScope.launch {
+            val parsed = withContext(Dispatchers.Default) {
+                NaturalLanguageParser.parse(text)
+            }
+            _event.value = parsed.copy(
+                title = shortenTitle(parsed.title),
+                description = text
+            )
+        }
     }
 
     private fun shortenTitle(title: String): String {
@@ -52,7 +57,7 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
 
     fun saveEvent() {
         viewModelScope.launch {
-            val calendarId = preferencesRepository.selectedCalendarId.first()
+            val calendarId = selectedCalendarId.value
             if (calendarId == null) {
                 _saveResult.value = SaveResult.Error("No calendar selected. Please select a calendar in Settings.")
                 return@launch

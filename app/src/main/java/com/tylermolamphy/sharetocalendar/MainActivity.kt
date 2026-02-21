@@ -6,6 +6,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -13,12 +16,20 @@ import com.tylermolamphy.sharetocalendar.ui.EventConfirmationScreen
 import com.tylermolamphy.sharetocalendar.ui.SettingsScreen
 import com.tylermolamphy.sharetocalendar.ui.theme.ShareToCalendarTheme
 
+private object NavRoutes {
+    const val CONFIRM = "confirm"
+    const val SETTINGS = "settings"
+}
+
 class MainActivity : ComponentActivity() {
+
+    private var sharedText by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val sharedText = extractSharedText(intent)
+        sharedText = extractSharedText(intent)
 
         setContent {
             ShareToCalendarTheme {
@@ -33,16 +44,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val sharedText = extractSharedText(intent)
-        if (sharedText != null) {
-            setContent {
-                ShareToCalendarTheme {
-                    AppNavigation(
-                        sharedText = sharedText,
-                        onFinish = { finish() }
-                    )
-                }
-            }
+        val newText = extractSharedText(intent)
+        if (newText != null) {
+            sharedText = newText
         }
     }
 
@@ -60,13 +64,13 @@ fun AppNavigation(
     onFinish: () -> Unit
 ) {
     val navController = rememberNavController()
-    val startDestination = if (sharedText != null) "confirm" else "settings"
+    val startDestination = if (sharedText != null) NavRoutes.CONFIRM else NavRoutes.SETTINGS
 
     NavHost(navController = navController, startDestination = startDestination) {
-        composable("settings") {
+        composable(NavRoutes.SETTINGS) {
             SettingsScreen()
         }
-        composable("confirm") {
+        composable(NavRoutes.CONFIRM) {
             EventConfirmationScreen(
                 sharedText = sharedText ?: "",
                 onDismiss = onFinish
