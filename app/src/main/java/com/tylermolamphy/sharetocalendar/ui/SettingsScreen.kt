@@ -45,7 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.tylermolamphy.sharetocalendar.model.CalendarInfo
 import com.tylermolamphy.sharetocalendar.viewmodel.SettingsViewModel
 
@@ -138,6 +138,7 @@ fun SettingsScreen(
                 }
 
                 LazyColumn(
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(calendars) { calendar ->
