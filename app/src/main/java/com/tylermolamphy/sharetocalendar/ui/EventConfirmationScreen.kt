@@ -84,7 +84,7 @@ fun EventConfirmationScreen(
 
     LaunchedEffect(sharedText) {
         if (sharedText.isNotBlank()) {
-            viewModel.parseSharedText(sharedText)
+            viewModel.parseSharedText(sharedText)  // suspend — awaits Default-dispatcher parse
         }
     }
 

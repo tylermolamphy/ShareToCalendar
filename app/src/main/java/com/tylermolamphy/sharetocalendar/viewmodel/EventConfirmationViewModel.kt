@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,16 +31,14 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
     val selectedCalendarId: StateFlow<Long?> = preferencesRepository.selectedCalendarId
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    fun parseSharedText(text: String) {
-        viewModelScope.launch {
-            val parsed = withContext(Dispatchers.Default) {
-                NaturalLanguageParser.parse(text)
-            }
-            _event.value = parsed.copy(
-                title = shortenTitle(parsed.title),
-                description = text
-            )
+    suspend fun parseSharedText(text: String) {
+        val parsed = withContext(Dispatchers.Default) {
+            NaturalLanguageParser.parse(text)
         }
+        _event.value = parsed.copy(
+            title = shortenTitle(parsed.title),
+            description = text
+        )
     }
 
     private fun shortenTitle(title: String): String {
@@ -57,7 +56,10 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
 
     fun saveEvent() {
         viewModelScope.launch {
+            // Use the cached StateFlow value if ready; fall back to a direct DataStore
+            // read so save never fails due to the StateFlow not having emitted yet.
             val calendarId = selectedCalendarId.value
+                ?: preferencesRepository.selectedCalendarId.first()
             if (calendarId == null) {
                 _saveResult.value = SaveResult.Error("No calendar selected. Please select a calendar in Settings.")
                 return@launch
