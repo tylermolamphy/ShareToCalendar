@@ -40,6 +40,20 @@ jobs:
       - name: Run unit tests & build debug APK
         run: ./gradlew test assembleDebug
 
+      - name: Decode release keystore
+        if: github.event_name == 'push'
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ${{ github.workspace }}/release.jks
+
+      - name: Build signed release APK
+        if: github.event_name == 'push'
+        run: ./gradlew assembleRelease
+        env:
+          KEYSTORE_PATH:     ${{ github.workspace }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.KEY_PASSWORD }}
+          VERSION_CODE:      ${{ github.run_number }}
+
       - name: Run Android lint
         run: ./gradlew lintDebug
 
@@ -54,7 +68,11 @@ jobs:
       - name: Get APK size
         id: apk
         run: |
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          else
+            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          fi
           APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
           echo "size=${APK_SIZE}" >> "$GITHUB_OUTPUT"
 
@@ -194,7 +212,7 @@ jobs:
           body: |
             Automated build from commit ${{ github.sha }}
             Branch: ${{ github.ref_name }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/release/app-release.apk
           generate_release_notes: true
 
   emulator:
