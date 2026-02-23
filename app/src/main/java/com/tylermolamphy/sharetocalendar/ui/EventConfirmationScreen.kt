@@ -49,6 +49,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tylermolamphy.sharetocalendar.viewmodel.EventConfirmationViewModel
@@ -82,9 +84,20 @@ fun EventConfirmationScreen(
     var showStartTimePicker by remember { mutableStateOf(false) }
     var showEndTimePicker by remember { mutableStateOf(false) }
 
+    // Title field value — tracks text + cursor/selection independently of ViewModel string
+    var titleFieldValue by remember { mutableStateOf(TextFieldValue("")) }
+
     LaunchedEffect(sharedText) {
         if (sharedText.isNotBlank()) {
             viewModel.parseSharedText(sharedText)  // suspend — awaits Default-dispatcher parse
+            val parsedTitle = viewModel.event.value.title
+            titleFieldValue = if (parsedTitle.isNotEmpty()) {
+                // Title found — pre-fill fully selected so any keystroke replaces it
+                TextFieldValue(parsedTitle, selection = TextRange(0, parsedTitle.length))
+            } else {
+                // No title detected — blank field ready for immediate input
+                TextFieldValue("")
+            }
         }
     }
 
@@ -187,6 +200,15 @@ fun EventConfirmationScreen(
                 },
                 actions = {
                     TextButton(
+                        onClick = {
+                            keyboardController?.hide()
+                            showDatePicker = true
+                        },
+                        modifier = Modifier.testTag("nextButton")
+                    ) {
+                        Text("Next")
+                    }
+                    TextButton(
                         onClick = { viewModel.saveEvent() },
                         modifier = Modifier.testTag("saveButton")
                     ) {
@@ -208,10 +230,13 @@ fun EventConfirmationScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Title — auto-focused on open
+            // Title — auto-focused on open; pre-filled + fully selected if NLP found a title
             OutlinedTextField(
-                value = event.title,
-                onValueChange = { viewModel.updateEvent(event.copy(title = it)) },
+                value = titleFieldValue,
+                onValueChange = { newValue ->
+                    titleFieldValue = newValue
+                    viewModel.updateEvent(event.copy(title = newValue.text))
+                },
                 label = { Text("Title") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -323,7 +348,8 @@ fun EventConfirmationScreen(
                 label = { Text("Description") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp),
+                    .height(120.dp)
+                    .testTag("descriptionField"),
                 maxLines = 5
             )
 
