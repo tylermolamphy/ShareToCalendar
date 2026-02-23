@@ -177,6 +177,18 @@ class NaturalLanguageParserTest {
     }
 
     @Test
+    fun `input with only date and time yields blank title`() {
+        // Entire input is consumed by date + time extraction; nothing left for title.
+        // This drives the UI behaviour where the title field is left blank for
+        // immediate user input rather than being pre-filled.
+        val event = NaturalLanguageParser.parse("tomorrow at 3pm", refDate)
+        assertEquals("", event.title)
+        assertEquals(refDate.plusDays(1), event.startDate)
+        assertEquals(LocalTime.of(15, 0), event.startTime)
+        assertFalse(event.isAllDay)
+    }
+
+    @Test
     fun `title only input`() {
         val event = NaturalLanguageParser.parse("Something important", refDate)
         assertEquals("Something important", event.title)

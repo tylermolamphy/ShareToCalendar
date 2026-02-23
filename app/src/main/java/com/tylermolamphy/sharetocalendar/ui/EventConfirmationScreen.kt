@@ -348,7 +348,8 @@ fun EventConfirmationScreen(
                 label = { Text("Description") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp),
+                    .height(120.dp)
+                    .testTag("descriptionField"),
                 maxLines = 5
             )
 
