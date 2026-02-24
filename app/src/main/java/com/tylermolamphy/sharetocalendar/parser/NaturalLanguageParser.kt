@@ -11,7 +11,13 @@ import java.util.Locale
 /**
  * Stateless regex-based parser that converts natural language text into a [CalendarEvent].
  *
- * Parsing order: dates -> times -> duration/end time -> location -> title (remainder).
+ * Parsing order:
+ *   1. Dates  – explicit (month/day, ISO, M/D/YYYY) then relative (tomorrow, next Monday …)
+ *   2. Time range – "2pm-4pm", "from 9am to 12pm" (start + end in one expression)
+ *   3. Single start time – noon, midnight, o'clock, "at X", standalone "Xpm"
+ *   4. End time / duration – "for N hours", "for half an hour", "until X", "till X", "by X"
+ *   5. Location  – "at/in <Place>"
+ *   6. Title     – everything remaining after all extractions
  */
 object NaturalLanguageParser {
 
@@ -29,50 +35,74 @@ object NaturalLanguageParser {
             text = dateResult.second
         }
 
-        // --- 2. Parse times ---
-        val timeResult = extractStartTime(text)
-        if (timeResult != null) {
-            startTime = timeResult.first
-            text = timeResult.second
+        // Pre-consume "by [time]" before start-time extraction so that "by 5pm"
+        // is never mistakenly captured as a start time by REGEX_STANDALONE_TIME.
+        var pendingEndFromBy: LocalTime? = null
+        val byPreResult = extractByTime(text)
+        if (byPreResult != null) {
+            pendingEndFromBy = byPreResult.first
+            text             = byPreResult.second
         }
 
-        // --- 3. Parse duration / end time ---
-        val endTimeResult = extractEndTime(text, startTime)
-        if (endTimeResult != null) {
-            endTime = endTimeResult.first
-            text = endTimeResult.second
+        // --- 2. Try time range first (captures start + end simultaneously) ---
+        val rangeResult = extractTimeRange(text)
+        if (rangeResult != null) {
+            startTime = rangeResult.first
+            endTime   = rangeResult.second
+            text      = rangeResult.third
+        } else {
+            // --- 3. Single start time ---
+            val timeResult = extractStartTime(text)
+            if (timeResult != null) {
+                startTime = timeResult.first
+                text = timeResult.second
+            }
+
+            // --- 4. End time / duration ---
+            val endTimeResult = extractEndTime(text, startTime)
+            if (endTimeResult != null) {
+                endTime = endTimeResult.first
+                text    = endTimeResult.second
+            }
+
+            // Apply pre-extracted "by X" as end time only when a start time was found
+            if (startTime != null && endTime == null && pendingEndFromBy != null) {
+                endTime = pendingEndFromBy
+            }
         }
 
-        // --- 4. Parse location ---
+        // --- 5. Location ---
         val locationResult = extractLocation(text)
         if (locationResult != null) {
             location = locationResult.first
-            text = locationResult.second
+            text     = locationResult.second
         }
 
-        // --- 5. Title = everything remaining ---
+        // --- 6. Title = everything remaining ---
         val title = cleanTitle(text)
 
-        val isAllDay = startTime == null
+        val isAllDay  = startTime == null
         val finalDate = date ?: referenceDate
 
-        // Default 1-hour duration if start time present but no end time
+        // Default 1-hour duration when start time is known but end time is not
         val finalEndTime = when {
             startTime != null && endTime == null -> startTime.plusHours(1)
             else -> endTime
         }
 
         return CalendarEvent(
-            title = title,
+            title     = title,
             startDate = finalDate,
             startTime = startTime,
-            endTime = finalEndTime,
-            location = location,
-            isAllDay = isAllDay
+            endTime   = finalEndTime,
+            location  = location,
+            isAllDay  = isAllDay
         )
     }
 
-    // ---- Date extraction ----
+    // ─────────────────────────────────────────────────────────────────────────
+    // Lookup tables
+    // ─────────────────────────────────────────────────────────────────────────
 
     private val MONTH_NAMES = mapOf(
         "january" to 1, "jan" to 1,
@@ -90,172 +120,280 @@ object NaturalLanguageParser {
     )
 
     private val DAY_NAMES = mapOf(
-        "monday" to DayOfWeek.MONDAY,
-        "tuesday" to DayOfWeek.TUESDAY,
+        "monday"    to DayOfWeek.MONDAY,
+        "tuesday"   to DayOfWeek.TUESDAY,
         "wednesday" to DayOfWeek.WEDNESDAY,
-        "thursday" to DayOfWeek.THURSDAY,
-        "friday" to DayOfWeek.FRIDAY,
-        "saturday" to DayOfWeek.SATURDAY,
-        "sunday" to DayOfWeek.SUNDAY
+        "thursday"  to DayOfWeek.THURSDAY,
+        "friday"    to DayOfWeek.FRIDAY,
+        "saturday"  to DayOfWeek.SATURDAY,
+        "sunday"    to DayOfWeek.SUNDAY
     )
 
-    // Compiled once at object init
-    private val REGEX_TODAY = Regex("\\btoday\\b", RegexOption.IGNORE_CASE)
+    // ─────────────────────────────────────────────────────────────────────────
+    // Date regexes (compiled once)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private val REGEX_TODAY    = Regex("\\btoday\\b",   RegexOption.IGNORE_CASE)
+    private val REGEX_TONIGHT  = Regex("\\btonight\\b", RegexOption.IGNORE_CASE)
     private val REGEX_TOMORROW = Regex("\\btomorrow\\b", RegexOption.IGNORE_CASE)
-    private val REGEX_RELATIVE = Regex("\\bin\\s+(\\d+)\\s+(day|days|week|weeks)\\b", RegexOption.IGNORE_CASE)
-    private val REGEX_NEXT_DAY = Regex(
-        "\\bnext\\s+(${DAY_NAMES.keys.joinToString("|")})\\b",
+
+    private val REGEX_RELATIVE = Regex(
+        "\\bin\\s+(\\d+)\\s+(day|days|week|weeks)\\b", RegexOption.IGNORE_CASE
+    )
+
+    // Explicit calendar dates — checked before relative day names so that
+    // "on Monday Jan 14" resolves to Jan 14, not just "Monday".
+    private val REGEX_MONTH_DAY = Regex(
+        "\\b(${MONTH_NAMES.keys.joinToString("|")})\\.?\\s+(\\d{1,2})" +
+                "(?:(?:st|nd|rd|th))?(?:[,\\s]+(\\d{4}))?\\b",
         RegexOption.IGNORE_CASE
+    )
+    // ISO 8601: 2025-01-15  (strict month/day ranges to avoid false positives)
+    private val REGEX_ISO_DATE = Regex(
+        "\\b(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])\\b"
+    )
+    // M/D/YYYY or M-D-YYYY  (year required — takes priority over short M/D)
+    private val REGEX_NUMERIC_DATE = Regex("\\b(\\d{1,2})[/\\-](\\d{1,2})[/\\-](\\d{4})\\b")
+    // M/D without year — must NOT be followed by another / or digit (avoids re-matching M/D/YYYY)
+    private val REGEX_SHORT_NUMERIC_DATE = Regex("\\b(\\d{1,2})/(\\d{1,2})(?![/\\-\\d])")
+
+    // Relative / named days
+    private val REGEX_NEXT_DAY = Regex(
+        "\\bnext\\s+(${DAY_NAMES.keys.joinToString("|")})\\b", RegexOption.IGNORE_CASE
+    )
+    private val REGEX_THIS_DAY = Regex(
+        "\\bthis\\s+(${DAY_NAMES.keys.joinToString("|")})\\b", RegexOption.IGNORE_CASE
     )
     private val REGEX_ON_DAY = Regex(
-        "\\bon\\s+(${DAY_NAMES.keys.joinToString("|")})\\b",
-        RegexOption.IGNORE_CASE
+        "\\bon\\s+(${DAY_NAMES.keys.joinToString("|")})\\b", RegexOption.IGNORE_CASE
     )
-    private val REGEX_MONTH_DAY = Regex(
-        "\\b(${MONTH_NAMES.keys.joinToString("|")})\\.?\\s+(\\d{1,2})(?:(?:st|nd|rd|th))?(?:[,\\s]+(\\d{4}))?\\b",
-        RegexOption.IGNORE_CASE
+    // Bare day name — lowest priority, catches "Monday at 3pm", "Friday 2pm", etc.
+    private val REGEX_BARE_DAY = Regex(
+        "\\b(${DAY_NAMES.keys.joinToString("|")})\\b", RegexOption.IGNORE_CASE
     )
-    private val REGEX_NUMERIC_DATE = Regex("\\b(\\d{1,2})[/\\-](\\d{1,2})[/\\-](\\d{4})\\b")
 
-    private val REGEX_NOON = Regex("\\b(?:at\\s+)?noon\\b", RegexOption.IGNORE_CASE)
+    // ─────────────────────────────────────────────────────────────────────────
+    // Time regexes
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private val REGEX_NOON     = Regex("\\b(?:at\\s+)?noon\\b",     RegexOption.IGNORE_CASE)
     private val REGEX_MIDNIGHT = Regex("\\b(?:at\\s+)?midnight\\b", RegexOption.IGNORE_CASE)
-    private val REGEX_TIME_WITH_AT = Regex("\\bat\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])?\\b")
+    // "3 o'clock" or "at 3 o'clock"
+    private val REGEX_OCLOCK   = Regex(
+        "\\b(?:at\\s+)?(\\d{1,2})\\s+o'?clock\\b", RegexOption.IGNORE_CASE
+    )
+    private val REGEX_TIME_WITH_AT    = Regex("\\bat\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])?\\b")
     private val REGEX_STANDALONE_TIME = Regex("\\b(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])\\b")
 
+    /**
+     * Time range: "2pm-4pm", "2-4pm", "from 2pm to 4pm", "9am–5pm", "9:00–17:00pm".
+     *
+     * The end am/pm is required so the parser knows the meridiem.  The start
+     * inherits the end meridiem when it has none (e.g. "2-4pm" → both PM).
+     * Separators: hyphen(s), en/em dash, "to", "through", "thru".
+     */
+    private val REGEX_TIME_RANGE = Regex(
+        "\\b(?:from\\s+)?" +
+                "(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])?" +
+                "\\s*(?:--?|–|—|to|through|thru)\\s*" +
+                "(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Duration / end-time regexes
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // "for half an hour" / "for half hour" / "for a half hour"
+    private val REGEX_DURATION_HALF_HOUR = Regex(
+        "\\bfor\\s+(?:a\\s+)?half(?:\\s+an?)?\\s*(?:hour|hr)\\b", RegexOption.IGNORE_CASE
+    )
     private val REGEX_DURATION_HOURS = Regex(
-        "\\bfor\\s+(\\d+)\\s*(?:hour|hours|hr|hrs)(?:\\s*(?:and\\s*)?(\\d+)\\s*(?:minute|minutes|min|mins))?\\b",
+        "\\bfor\\s+(\\d+)\\s*(?:hour|hours|hr|hrs)" +
+                "(?:\\s*(?:and\\s*)?(\\d+)\\s*(?:minute|minutes|min|mins))?\\b",
         RegexOption.IGNORE_CASE
     )
     private val REGEX_DURATION_MINUTES = Regex(
-        "\\bfor\\s+(\\d+)\\s*(?:minute|minutes|min|mins)\\b",
+        "\\bfor\\s+(\\d+)\\s*(?:minute|minutes|min|mins)\\b", RegexOption.IGNORE_CASE
+    )
+    // "until / till / thru / through <time>"
+    private val REGEX_UNTIL = Regex(
+        "\\b(?:until|till|til|through|thru)\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])?\\b",
         RegexOption.IGNORE_CASE
     )
-    private val REGEX_UNTIL = Regex(
-        "\\buntil\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])?\\b",
-        RegexOption.IGNORE_CASE
+    // "by 5pm" — end-time deadline; only applied when a start time exists
+    private val REGEX_BY_TIME = Regex(
+        "\\bby\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])\\b", RegexOption.IGNORE_CASE
     )
 
-    private val REGEX_AT_LOCATION = Regex(
-        "\\b(?:at|in)\\s+([A-Z][A-Za-z0-9' ]+?)(?:\\s*$)",
-        RegexOption.MULTILINE
+    // ─────────────────────────────────────────────────────────────────────────
+    // Location regex
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private val REGEX_AT_LOCATION   = Regex(
+        "\\b(?:at|in)\\s+([A-Z][A-Za-z0-9' ]+?)(?:\\s*$)", RegexOption.MULTILINE
     )
     private val REGEX_LOCATION_DIGIT = Regex("\\d+.*")
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Title cleanup regexes
+    // ─────────────────────────────────────────────────────────────────────────
+
     private val REGEX_COLLAPSE_WHITESPACE = Regex("\\s{2,}")
-    private val REGEX_LEADING_PUNCT = Regex("^[\\s,;\\-]+")
-    private val REGEX_TRAILING_PUNCT = Regex("[\\s,;\\-]+$")
+    private val REGEX_LEADING_PUNCT       = Regex("^[\\s,;\\-]+")
+    private val REGEX_TRAILING_PUNCT      = Regex("[\\s,;\\-]+$")
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Date extraction
+    // ─────────────────────────────────────────────────────────────────────────
 
     private fun extractDate(text: String, ref: LocalDate): Pair<LocalDate, String>? {
-        // "today"
-        val todayMatch = REGEX_TODAY.find(text)
-        if (todayMatch != null) {
-            return ref to text.removeRange(todayMatch.range).trim()
+        // ── Relative anchors ────────────────────────────────────────────────
+        REGEX_TODAY.find(text)?.let { return ref to text.removeRange(it.range).trim() }
+        // "tonight" is an alias for today (time is captured separately)
+        REGEX_TONIGHT.find(text)?.let { return ref to text.removeRange(it.range).trim() }
+        REGEX_TOMORROW.find(text)?.let { return ref.plusDays(1) to text.removeRange(it.range).trim() }
+
+        REGEX_RELATIVE.find(text)?.let { m ->
+            val n    = m.groupValues[1].toLong()
+            val unit = m.groupValues[2].lowercase()
+            val d    = if (unit.startsWith("week")) ref.plusWeeks(n) else ref.plusDays(n)
+            return d to text.removeRange(m.range).trim()
         }
 
-        // "tomorrow"
-        val tomorrowMatch = REGEX_TOMORROW.find(text)
-        if (tomorrowMatch != null) {
-            return ref.plusDays(1) to text.removeRange(tomorrowMatch.range).trim()
-        }
-
-        // "in N days/weeks"
-        val relativeMatch = REGEX_RELATIVE.find(text)
-        if (relativeMatch != null) {
-            val n = relativeMatch.groupValues[1].toLong()
-            val unit = relativeMatch.groupValues[2].lowercase()
-            val date = if (unit.startsWith("week")) ref.plusWeeks(n) else ref.plusDays(n)
-            return date to text.removeRange(relativeMatch.range).trim()
-        }
-
-        // "next Monday", "next Tuesday", etc.
-        val nextDayMatch = REGEX_NEXT_DAY.find(text)
-        if (nextDayMatch != null) {
-            val dayOfWeek = DAY_NAMES[nextDayMatch.groupValues[1].lowercase()]!!
-            val date = ref.with(TemporalAdjusters.next(dayOfWeek))
-            return date to text.removeRange(nextDayMatch.range).trim()
-        }
-
-        // Day name without "next" — means the upcoming occurrence
-        val dayMatch = REGEX_ON_DAY.find(text)
-        if (dayMatch != null) {
-            val dayOfWeek = DAY_NAMES[dayMatch.groupValues[1].lowercase()]!!
-            val date = ref.with(TemporalAdjusters.nextOrSame(dayOfWeek))
-            return date to text.removeRange(dayMatch.range).trim()
-        }
-
-        // "Month Day" or "Month Day, Year" — e.g. "Jan 15", "January 15, 2025"
-        val monthDayMatch = REGEX_MONTH_DAY.find(text)
-        if (monthDayMatch != null) {
-            val month = MONTH_NAMES[monthDayMatch.groupValues[1].lowercase()]!!
-            val day = monthDayMatch.groupValues[2].toInt()
-            val year = if (monthDayMatch.groupValues[3].isNotEmpty()) {
-                monthDayMatch.groupValues[3].toInt()
+        // ── Explicit calendar dates (checked before day-name patterns so that
+        //    "on Monday Jan 14" resolves to Jan 14, not the generic "Monday") ─
+        REGEX_MONTH_DAY.find(text)?.let { m ->
+            val month = MONTH_NAMES[m.groupValues[1].lowercase()]!!
+            val day   = m.groupValues[2].toInt()
+            val year  = if (m.groupValues[3].isNotEmpty()) {
+                m.groupValues[3].toInt()
             } else {
-                // Use current year, but if the date already passed, use next year
                 val candidate = LocalDate.of(ref.year, month, day)
                 if (candidate.isBefore(ref)) ref.year + 1 else ref.year
             }
-            return LocalDate.of(year, month, day) to text.removeRange(monthDayMatch.range).trim()
+            return safeDate(year, month, day)?.let { it to text.removeRange(m.range).trim() }
         }
 
-        // "M/D/YYYY" or "M-D-YYYY"
-        val numericDateMatch = REGEX_NUMERIC_DATE.find(text)
-        if (numericDateMatch != null) {
-            val month = numericDateMatch.groupValues[1].toInt()
-            val day = numericDateMatch.groupValues[2].toInt()
-            val year = numericDateMatch.groupValues[3].toInt()
-            return LocalDate.of(year, month, day) to text.removeRange(numericDateMatch.range).trim()
+        REGEX_ISO_DATE.find(text)?.let { m ->
+            val year  = m.groupValues[1].toInt()
+            val month = m.groupValues[2].toInt()
+            val day   = m.groupValues[3].toInt()
+            return safeDate(year, month, day)?.let { it to text.removeRange(m.range).trim() }
+        }
+
+        REGEX_NUMERIC_DATE.find(text)?.let { m ->
+            val month = m.groupValues[1].toInt()
+            val day   = m.groupValues[2].toInt()
+            val year  = m.groupValues[3].toInt()
+            return safeDate(year, month, day)?.let { it to text.removeRange(m.range).trim() }
+        }
+
+        // ── Named-day patterns ────────────────────────────────────────────────
+        REGEX_NEXT_DAY.find(text)?.let { m ->
+            val dow = DAY_NAMES[m.groupValues[1].lowercase()]!!
+            return ref.with(TemporalAdjusters.next(dow)) to text.removeRange(m.range).trim()
+        }
+        REGEX_THIS_DAY.find(text)?.let { m ->
+            val dow = DAY_NAMES[m.groupValues[1].lowercase()]!!
+            return ref.with(TemporalAdjusters.nextOrSame(dow)) to text.removeRange(m.range).trim()
+        }
+        REGEX_ON_DAY.find(text)?.let { m ->
+            val dow = DAY_NAMES[m.groupValues[1].lowercase()]!!
+            return ref.with(TemporalAdjusters.nextOrSame(dow)) to text.removeRange(m.range).trim()
+        }
+
+        // ── Short numeric date M/D (no year) ─────────────────────────────────
+        REGEX_SHORT_NUMERIC_DATE.find(text)?.let { m ->
+            val month = m.groupValues[1].toInt()
+            val day   = m.groupValues[2].toInt()
+            if (month in 1..12 && day in 1..31) {
+                val year = run {
+                    val candidate = LocalDate.of(ref.year, month, day)
+                    if (candidate.isBefore(ref)) ref.year + 1 else ref.year
+                }
+                return safeDate(year, month, day)?.let { it to text.removeRange(m.range).trim() }
+            }
+        }
+
+        // ── Bare day name — lowest priority ───────────────────────────────────
+        // Catches "Monday at 3pm", "Friday 2pm", day names without a preposition.
+        REGEX_BARE_DAY.find(text)?.let { m ->
+            val dow = DAY_NAMES[m.groupValues[1].lowercase()]!!
+            return ref.with(TemporalAdjusters.nextOrSame(dow)) to text.removeRange(m.range).trim()
         }
 
         return null
     }
 
-    // ---- Time extraction ----
+    /** Returns null instead of throwing for out-of-range date components. */
+    private fun safeDate(year: Int, month: Int, day: Int): LocalDate? = try {
+        LocalDate.of(year, month, day)
+    } catch (_: Exception) {
+        null
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Time range extraction
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Extracts a "by [time]" end-time deadline, removing it from the text. */
+    private fun extractByTime(text: String): Pair<LocalTime, String>? {
+        val m = REGEX_BY_TIME.find(text) ?: return null
+        return parseTimeComponents(m.groupValues[1], m.groupValues[2], m.groupValues[3])
+            ?.let { it to text.removeRange(m.range).trim() }
+    }
+
+    /**
+     * Extracts a start+end time from a single range expression.
+     * When the start time has no explicit am/pm it inherits from the end
+     * (e.g. "2-4pm" → both PM; "10am-12pm" → start AM, end PM).
+     */
+    private fun extractTimeRange(text: String): Triple<LocalTime, LocalTime, String>? {
+        val m = REGEX_TIME_RANGE.find(text) ?: return null
+        val endAmPm            = m.groupValues[6]
+        val effectiveStartAmPm = m.groupValues[3].ifEmpty { endAmPm }
+        val startTime = parseTimeComponents(m.groupValues[1], m.groupValues[2], effectiveStartAmPm)
+            ?: return null
+        val endTime   = parseTimeComponents(m.groupValues[4], m.groupValues[5], endAmPm)
+            ?: return null
+        return Triple(startTime, endTime, text.removeRange(m.range).trim())
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Single start-time extraction
+    // ─────────────────────────────────────────────────────────────────────────
 
     private fun extractStartTime(text: String): Pair<LocalTime, String>? {
-        // "noon"
-        val noonMatch = REGEX_NOON.find(text)
-        if (noonMatch != null) {
-            return LocalTime.of(12, 0) to text.removeRange(noonMatch.range).trim()
+        REGEX_NOON.find(text)?.let {
+            return LocalTime.of(12, 0) to text.removeRange(it.range).trim()
         }
-
-        // "midnight"
-        val midnightMatch = REGEX_MIDNIGHT.find(text)
-        if (midnightMatch != null) {
-            return LocalTime.of(0, 0) to text.removeRange(midnightMatch.range).trim()
+        REGEX_MIDNIGHT.find(text)?.let {
+            return LocalTime.of(0, 0) to text.removeRange(it.range).trim()
         }
-
-        // "at 2pm", "at 2:30pm", "at 14:00", "at 2:30 PM"
-        val timeMatch = REGEX_TIME_WITH_AT.find(text)
-        if (timeMatch != null) {
-            val time = parseTimeComponents(
-                timeMatch.groupValues[1],
-                timeMatch.groupValues[2],
-                timeMatch.groupValues[3]
-            )
-            if (time != null) {
-                return time to text.removeRange(timeMatch.range).trim()
+        // "3 o'clock" / "at 3 o'clock"  — no am/pm context, treated as 24 h
+        REGEX_OCLOCK.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], "", "")?.let { t ->
+                return t to text.removeRange(m.range).trim()
             }
         }
-
-        // Standalone time without "at": "2pm", "3:30PM" — but only if at a word boundary
-        val standaloneMatch = REGEX_STANDALONE_TIME.find(text)
-        if (standaloneMatch != null) {
-            val time = parseTimeComponents(
-                standaloneMatch.groupValues[1],
-                standaloneMatch.groupValues[2],
-                standaloneMatch.groupValues[3]
-            )
-            if (time != null) {
-                return time to text.removeRange(standaloneMatch.range).trim()
+        // "at 2pm", "at 2:30 PM", "at 14:00"
+        REGEX_TIME_WITH_AT.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], m.groupValues[2], m.groupValues[3])?.let { t ->
+                return t to text.removeRange(m.range).trim()
             }
         }
-
+        // Standalone "2pm", "3:30PM" (am/pm required to avoid matching bare numbers)
+        REGEX_STANDALONE_TIME.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], m.groupValues[2], m.groupValues[3])?.let { t ->
+                return t to text.removeRange(m.range).trim()
+            }
+        }
         return null
     }
 
     private fun parseTimeComponents(hourStr: String, minuteStr: String, ampmStr: String): LocalTime? {
-        var hour = hourStr.toIntOrNull() ?: return null
+        var hour   = hourStr.toIntOrNull() ?: return null
         val minute = if (minuteStr.isNotEmpty()) minuteStr.toIntOrNull() ?: 0 else 0
 
         if (ampmStr.isNotEmpty()) {
@@ -268,72 +406,61 @@ object NaturalLanguageParser {
         return LocalTime.of(hour, minute)
     }
 
-    // ---- End time / Duration ----
+    // ─────────────────────────────────────────────────────────────────────────
+    // End time / duration extraction
+    // ─────────────────────────────────────────────────────────────────────────
 
     private fun extractEndTime(text: String, startTime: LocalTime?): Pair<LocalTime, String>? {
-        // "for N hour(s)" / "for N minute(s)" / "for N hour(s) and N minute(s)"
-        val durationMatch = REGEX_DURATION_HOURS.find(text)
-        if (durationMatch != null && startTime != null) {
-            val hours = durationMatch.groupValues[1].toLong()
-            val minutes = if (durationMatch.groupValues[2].isNotEmpty()) {
-                durationMatch.groupValues[2].toLong()
-            } else 0L
-            val end = startTime.plusHours(hours).plusMinutes(minutes)
-            return end to text.removeRange(durationMatch.range).trim()
+        // "for half an hour"
+        REGEX_DURATION_HALF_HOUR.find(text)?.let { m ->
+            if (startTime != null)
+                return startTime.plusMinutes(30) to text.removeRange(m.range).trim()
         }
-
-        // "for N minutes" (minutes only)
-        val minutesDurationMatch = REGEX_DURATION_MINUTES.find(text)
-        if (minutesDurationMatch != null && startTime != null) {
-            val minutes = minutesDurationMatch.groupValues[1].toLong()
-            val end = startTime.plusMinutes(minutes)
-            return end to text.removeRange(minutesDurationMatch.range).trim()
-        }
-
-        // "until 4pm" / "until 16:00"
-        val untilMatch = REGEX_UNTIL.find(text)
-        if (untilMatch != null) {
-            val time = parseTimeComponents(
-                untilMatch.groupValues[1],
-                untilMatch.groupValues[2],
-                untilMatch.groupValues[3]
-            )
-            if (time != null) {
-                return time to text.removeRange(untilMatch.range).trim()
+        // "for N hour(s) [and N minutes]"
+        REGEX_DURATION_HOURS.find(text)?.let { m ->
+            if (startTime != null) {
+                val hours   = m.groupValues[1].toLong()
+                val minutes = m.groupValues[2].toLongOrNull() ?: 0L
+                return startTime.plusHours(hours).plusMinutes(minutes) to
+                        text.removeRange(m.range).trim()
             }
         }
-
+        // "for N minutes"
+        REGEX_DURATION_MINUTES.find(text)?.let { m ->
+            if (startTime != null) {
+                return startTime.plusMinutes(m.groupValues[1].toLong()) to
+                        text.removeRange(m.range).trim()
+            }
+        }
+        // "until / till / through / thru <time>"
+        REGEX_UNTIL.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], m.groupValues[2], m.groupValues[3])?.let { t ->
+                return t to text.removeRange(m.range).trim()
+            }
+        }
         return null
     }
 
-    // ---- Location extraction ----
+    // ─────────────────────────────────────────────────────────────────────────
+    // Location extraction
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Extracts location from "at <Place>" or "in <Place>" patterns.
-     * Distinguishes from time "at" by checking if followed by a digit (time token).
-     */
     private fun extractLocation(text: String): Pair<String, String>? {
-        // "at <Place>" — only if NOT followed by a digit (which would be a time)
-        // Location is assumed to be the rest of the phrase until end-of-string or a known delimiter
-        val atMatch = REGEX_AT_LOCATION.find(text)
-        if (atMatch != null) {
-            val loc = atMatch.groupValues[1].trim()
-            // Don't treat very short matches or time-like strings as locations
-            if (loc.length >= 2 && !loc.matches(REGEX_LOCATION_DIGIT)) {
-                return loc to text.removeRange(atMatch.range).trim()
-            }
+        val m = REGEX_AT_LOCATION.find(text) ?: return null
+        val loc = m.groupValues[1].trim()
+        if (loc.length >= 2 && !loc.matches(REGEX_LOCATION_DIGIT)) {
+            return loc to text.removeRange(m.range).trim()
         }
-
         return null
     }
 
-    // ---- Title cleanup ----
+    // ─────────────────────────────────────────────────────────────────────────
+    // Title cleanup
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private fun cleanTitle(text: String): String {
-        return text
-            .replace(REGEX_COLLAPSE_WHITESPACE, " ")  // collapse whitespace
-            .replace(REGEX_LEADING_PUNCT, "")          // trim leading punctuation
-            .replace(REGEX_TRAILING_PUNCT, "")          // trim trailing punctuation
-            .trim()
-    }
+    private fun cleanTitle(text: String): String = text
+        .replace(REGEX_COLLAPSE_WHITESPACE, " ")
+        .replace(REGEX_LEADING_PUNCT, "")
+        .replace(REGEX_TRAILING_PUNCT, "")
+        .trim()
 }
