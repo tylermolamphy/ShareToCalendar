@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
 
     private fun extractSharedText(intent: Intent?): String? {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            return intent.getStringExtra(Intent.EXTRA_TEXT)
+            return intent.getStringExtra(Intent.EXTRA_TEXT)?.take(10_000)
         }
         return null
     }

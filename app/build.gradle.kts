@@ -41,6 +41,7 @@ android {
             // signingConfig is null when env vars are absent (local/PR builds); that's intentional.
             // CI sets all four env vars and gets a properly signed APK.
             signingConfig = signingConfigs.findByName("release")
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
