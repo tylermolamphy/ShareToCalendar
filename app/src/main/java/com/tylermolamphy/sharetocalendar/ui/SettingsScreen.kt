@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import com.tylermolamphy.sharetocalendar.BuildConfig
 import com.tylermolamphy.sharetocalendar.model.CalendarInfo
 import com.tylermolamphy.sharetocalendar.viewmodel.SettingsViewModel
 
@@ -69,6 +70,14 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Share to Calendar") },
+                actions = {
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -216,7 +225,7 @@ private fun AboutSection() {
                 textDecoration = TextDecoration.Underline,
                 modifier = Modifier.clickable {
                     context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/tylermolamphy"))
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://molamphy.net"))
                     )
                 }
             )
@@ -229,7 +238,7 @@ private fun AboutSection() {
                     context.startActivity(
                         Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse("https://github.com/tylermolamphy/ShareToCalendar")
+                            Uri.parse("https://github.com/tylermolamphy/ShareToCalendar/releases")
                         )
                     )
                 }
