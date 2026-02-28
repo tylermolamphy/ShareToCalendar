@@ -77,7 +77,8 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
                     _saveResult.value = SaveResult.Error("Failed to save event.")
                 }
             } catch (e: Exception) {
-                _saveResult.value = SaveResult.Error(e.message ?: "Unknown error occurred.")
+                android.util.Log.e("EventConfirmationVM", "Failed to save event", e)
+                _saveResult.value = SaveResult.Error("Failed to save event. Please try again.")
             }
         }
     }

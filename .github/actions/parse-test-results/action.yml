@@ -29,41 +29,45 @@ runs:
     - name: Parse test results
       id: parse
       shell: bash
+      env:
+        RESULTS_GLOB: ${{ inputs.results-glob }}
       run: |
         TOTAL=0
         FAILED=0
         TABLE_ROWS=""
 
-        for f in ${{ inputs.results-glob }}; do
-          [ -f "$f" ] || continue
+        for pattern in $RESULTS_GLOB; do
+          for f in $pattern; do
+            [ -f "$f" ] || continue
 
-          T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
-          F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
-          E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
-          TOTAL=$((TOTAL + ${T:-0}))
-          FAILED=$((FAILED + ${F:-0} + ${E:-0}))
+            T=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
+            F=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
+            E=$(grep -oP 'errors="\K[0-9]+' "$f" | head -1)
+            TOTAL=$((TOTAL + ${T:-0}))
+            FAILED=$((FAILED + ${F:-0} + ${E:-0}))
 
-          # Extract suite name from <testsuite> element
-          SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
-          SHORT_SUITE="${SUITE##*.}"
+            # Extract suite name from <testsuite> element
+            SUITE=$(grep -oP ' name="\K[^"]+' "$f" | head -1)
+            SHORT_SUITE="${SUITE##*.}"
 
-          # Add suite header row
-          TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
+            # Add suite header row
+            TABLE_ROWS="${TABLE_ROWS}| | **${SHORT_SUITE}** | |\n"
 
-          # Parse each <testcase> element
-          while IFS= read -r line; do
-            TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
-            TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
-            # Escape pipes in test names for Markdown
-            TC_NAME="${TC_NAME//|/\\|}"
+            # Parse each <testcase> element
+            while IFS= read -r line; do
+              TC_NAME=$(echo "$line" | grep -oP ' name="\K[^"]+')
+              TC_TIME=$(echo "$line" | grep -oP ' time="\K[^"]+')
+              # Escape pipes in test names for Markdown
+              TC_NAME="${TC_NAME//|/\\|}"
 
-            # Self-closing /> means pass; otherwise has <failure> child
-            if echo "$line" | grep -q '/>'; then
-              TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
-            else
-              TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
-            fi
-          done < <(grep '<testcase ' "$f")
+              # Self-closing /> means pass; otherwise has <failure> child
+              if echo "$line" | grep -q '/>'; then
+                TABLE_ROWS="${TABLE_ROWS}| ✅ | ${TC_NAME} | ${TC_TIME}s |\n"
+              else
+                TABLE_ROWS="${TABLE_ROWS}| ❌ | ${TC_NAME} | ${TC_TIME}s |\n"
+              fi
+            done < <(grep '<testcase ' "$f")
+          done
         done
 
         PASSED=$((TOTAL - FAILED))
