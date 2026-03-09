@@ -13,11 +13,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -200,19 +203,19 @@ fun EventConfirmationScreen(
                 },
                 actions = {
                     TextButton(
+                        onClick = { viewModel.saveEvent() },
+                        modifier = Modifier.testTag("saveButton")
+                    ) {
+                        Text("Save")
+                    }
+                    IconButton(
                         onClick = {
                             keyboardController?.hide()
                             showDatePicker = true
                         },
                         modifier = Modifier.testTag("nextButton")
                     ) {
-                        Text("Next")
-                    }
-                    TextButton(
-                        onClick = { viewModel.saveEvent() },
-                        modifier = Modifier.testTag("saveButton")
-                    ) {
-                        Text("Save")
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -242,7 +245,8 @@ fun EventConfirmationScreen(
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
                     .testTag("titleField"),
-                singleLine = true
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
             )
 
             // All-day toggle
@@ -365,10 +369,11 @@ private fun M3TimePickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (hour: Int, minute: Int) -> Unit
 ) {
+    val context = LocalContext.current
     val state = rememberTimePickerState(
         initialHour = initialHour,
         initialMinute = initialMinute,
-        is24Hour = false
+        is24Hour = android.text.format.DateFormat.is24HourFormat(context)
     )
     AlertDialog(
         onDismissRequest = onDismiss,
