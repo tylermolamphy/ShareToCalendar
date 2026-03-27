@@ -69,6 +69,14 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
                 _saveResult.value = SaveResult.Error("Event title cannot be empty.")
                 return@launch
             }
+            if (!currentEvent.isAllDay &&
+                currentEvent.startTime != null &&
+                currentEvent.endTime != null &&
+                !currentEvent.endTime.isAfter(currentEvent.startTime)
+            ) {
+                _saveResult.value = SaveResult.Error("End time must be after start time.")
+                return@launch
+            }
             try {
                 val eventId = calendarRepository.insertEvent(calendarId, currentEvent)
                 if (eventId != null) {
