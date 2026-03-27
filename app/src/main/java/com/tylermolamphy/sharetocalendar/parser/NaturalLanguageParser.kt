@@ -126,7 +126,17 @@ object NaturalLanguageParser {
         "thursday"  to DayOfWeek.THURSDAY,
         "friday"    to DayOfWeek.FRIDAY,
         "saturday"  to DayOfWeek.SATURDAY,
-        "sunday"    to DayOfWeek.SUNDAY
+        "sunday"    to DayOfWeek.SUNDAY,
+        // Abbreviated forms — all four day-name regexes pick these up automatically
+        // via DAY_NAMES.keys.joinToString("|"). Note: \bsun\b and \bsat\b carry a small
+        // false-positive risk in free text, but calendar-share snippets are typically short.
+        "mon"       to DayOfWeek.MONDAY,
+        "tue"       to DayOfWeek.TUESDAY,  "tues"  to DayOfWeek.TUESDAY,
+        "wed"       to DayOfWeek.WEDNESDAY,
+        "thu"       to DayOfWeek.THURSDAY, "thur"  to DayOfWeek.THURSDAY, "thurs" to DayOfWeek.THURSDAY,
+        "fri"       to DayOfWeek.FRIDAY,
+        "sat"       to DayOfWeek.SATURDAY,
+        "sun"       to DayOfWeek.SUNDAY
     )
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -148,6 +158,13 @@ object NaturalLanguageParser {
                 "(?:(?:st|nd|rd|th))?(?:[,\\s]+(\\d{4}))?\\b",
         RegexOption.IGNORE_CASE
     )
+    // "15th of January", "3rd of March 2025" — ordinal-first (British / formal invite style)
+    private val REGEX_DAY_OF_MONTH = Regex(
+        "\\b(\\d{1,2})(?:st|nd|rd|th)\\s+(?:of\\s+)?(${MONTH_NAMES.keys.joinToString("|")})\\.?" +
+                "(?:[,\\s]+(\\d{4}))?\\b",
+        RegexOption.IGNORE_CASE
+    )
+
     // ISO 8601: 2025-01-15  (strict month/day ranges to avoid false positives)
     private val REGEX_ISO_DATE = Regex(
         "\\b(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])\\b"
@@ -178,9 +195,21 @@ object NaturalLanguageParser {
 
     private val REGEX_NOON     = Regex("\\b(?:at\\s+)?noon\\b",     RegexOption.IGNORE_CASE)
     private val REGEX_MIDNIGHT = Regex("\\b(?:at\\s+)?midnight\\b", RegexOption.IGNORE_CASE)
-    // "3 o'clock" or "at 3 o'clock"
+    // "3 o'clock" or "at 3 o'clock [pm]"
     private val REGEX_OCLOCK   = Regex(
-        "\\b(?:at\\s+)?(\\d{1,2})\\s+o'?clock\\b", RegexOption.IGNORE_CASE
+        "\\b(?:at\\s+)?(\\d{1,2})\\s+o'?clock(?:\\s*([aApP][mM]))?\\b", RegexOption.IGNORE_CASE
+    )
+    // "half past 3", "half past 2pm"
+    private val REGEX_HALF_PAST = Regex(
+        "\\b(?:at\\s+)?half\\s+past\\s+(\\d{1,2})(?:\\s*([aApP][mM]))?\\b", RegexOption.IGNORE_CASE
+    )
+    // "quarter past 9am", "quarter past 2"
+    private val REGEX_QUARTER_PAST = Regex(
+        "\\b(?:at\\s+)?quarter\\s+past\\s+(\\d{1,2})(?:\\s*([aApP][mM]))?\\b", RegexOption.IGNORE_CASE
+    )
+    // "quarter to 5pm", "quarter to 4"
+    private val REGEX_QUARTER_TO = Regex(
+        "\\b(?:at\\s+)?quarter\\s+to\\s+(\\d{1,2})(?:\\s*([aApP][mM]))?\\b", RegexOption.IGNORE_CASE
     )
     private val REGEX_TIME_WITH_AT    = Regex("\\bat\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])?\\b")
     private val REGEX_STANDALONE_TIME = Regex("\\b(\\d{1,2})(?::(\\d{2}))?\\s*([aApP][mM])\\b")
@@ -207,6 +236,14 @@ object NaturalLanguageParser {
     // "for half an hour" / "for half hour" / "for a half hour"
     private val REGEX_DURATION_HALF_HOUR = Regex(
         "\\bfor\\s+(?:a\\s+)?half(?:\\s+an?)?\\s*(?:hour|hr)\\b", RegexOption.IGNORE_CASE
+    )
+    // "for an hour" / "for a hour"
+    private val REGEX_DURATION_AN_HOUR = Regex(
+        "\\bfor\\s+an?\\s+(?:hour|hr)\\b", RegexOption.IGNORE_CASE
+    )
+    // "for 1.5 hours" / "for 2.5 hrs" — decimal .5 only (= 30 extra minutes)
+    private val REGEX_DURATION_DECIMAL_HOURS = Regex(
+        "\\bfor\\s+(\\d+)\\.5\\s*(?:hour|hours|hr|hrs)\\b", RegexOption.IGNORE_CASE
     )
     private val REGEX_DURATION_HOURS = Regex(
         "\\bfor\\s+(\\d+)\\s*(?:hour|hours|hr|hrs)" +
@@ -263,6 +300,20 @@ object NaturalLanguageParser {
 
         // ── Explicit calendar dates (checked before day-name patterns so that
         //    "on Monday Jan 14" resolves to Jan 14, not the generic "Monday") ─
+
+        // "15th of January", "3rd March 2025" — ordinal-first (British / formal invite style)
+        REGEX_DAY_OF_MONTH.find(text)?.let { m ->
+            val day   = m.groupValues[1].toInt()
+            val month = MONTH_NAMES[m.groupValues[2].lowercase()]!!
+            val year  = if (m.groupValues[3].isNotEmpty()) {
+                m.groupValues[3].toInt()
+            } else {
+                val candidate = LocalDate.of(ref.year, month, day)
+                if (candidate.isBefore(ref)) ref.year + 1 else ref.year
+            }
+            return safeDate(year, month, day)?.let { it to text.removeRange(m.range).trim() }
+        }
+
         REGEX_MONTH_DAY.find(text)?.let { m ->
             val month = MONTH_NAMES[m.groupValues[1].lowercase()]!!
             val day   = m.groupValues[2].toInt()
@@ -365,15 +416,34 @@ object NaturalLanguageParser {
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun extractStartTime(text: String): Pair<LocalTime, String>? {
+        // "half past 3pm" → 15:30,  "half past 9" → 9:30
+        REGEX_HALF_PAST.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], "", m.groupValues[2])?.let { base ->
+                return base.withMinute(30) to text.removeRange(m.range).trim()
+            }
+        }
+        // "quarter past 9am" → 9:15,  "quarter past 2" → 2:15
+        REGEX_QUARTER_PAST.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], "", m.groupValues[2])?.let { base ->
+                return base.withMinute(15) to text.removeRange(m.range).trim()
+            }
+        }
+        // "quarter to 5pm" → 16:45,  "quarter to 12" → 11:45
+        REGEX_QUARTER_TO.find(text)?.let { m ->
+            parseTimeComponents(m.groupValues[1], "", m.groupValues[2])?.let { base ->
+                val adjusted = base.minusHours(1).withMinute(45)
+                return adjusted to text.removeRange(m.range).trim()
+            }
+        }
         REGEX_NOON.find(text)?.let {
             return LocalTime.of(12, 0) to text.removeRange(it.range).trim()
         }
         REGEX_MIDNIGHT.find(text)?.let {
             return LocalTime.of(0, 0) to text.removeRange(it.range).trim()
         }
-        // "3 o'clock" / "at 3 o'clock"  — no am/pm context, treated as 24 h
+        // "3 o'clock" / "at 3 o'clock [pm]"
         REGEX_OCLOCK.find(text)?.let { m ->
-            parseTimeComponents(m.groupValues[1], "", "")?.let { t ->
+            parseTimeComponents(m.groupValues[1], "", m.groupValues[2])?.let { t ->
                 return t to text.removeRange(m.range).trim()
             }
         }
@@ -415,6 +485,19 @@ object NaturalLanguageParser {
         REGEX_DURATION_HALF_HOUR.find(text)?.let { m ->
             if (startTime != null)
                 return startTime.plusMinutes(30) to text.removeRange(m.range).trim()
+        }
+        // "for an hour" / "for a hour"
+        REGEX_DURATION_AN_HOUR.find(text)?.let { m ->
+            if (startTime != null)
+                return startTime.plusHours(1) to text.removeRange(m.range).trim()
+        }
+        // "for 1.5 hours" / "for 2.5 hrs" — integer part + 30 minutes
+        REGEX_DURATION_DECIMAL_HOURS.find(text)?.let { m ->
+            if (startTime != null) {
+                val wholeHours = m.groupValues[1].toLong()
+                return startTime.plusHours(wholeHours).plusMinutes(30) to
+                        text.removeRange(m.range).trim()
+            }
         }
         // "for N hour(s) [and N minutes]"
         REGEX_DURATION_HOURS.find(text)?.let { m ->

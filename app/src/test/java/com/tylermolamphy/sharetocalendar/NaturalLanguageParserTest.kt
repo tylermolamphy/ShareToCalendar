@@ -492,4 +492,231 @@ class NaturalLanguageParserTest {
         assertEquals(LocalDate.of(2025, 1, 16), event.startDate)
         assertEquals(LocalTime.of(14, 0), event.startTime)
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Day abbreviations: Mon / Tue / Wed / Thu / Fri / Sat / Sun
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `abbreviated day Mon resolves to next Monday`() {
+        // refDate = Friday Jan 10; nextOrSame(Monday) → Jan 13
+        val event = NaturalLanguageParser.parse("Coffee Mon at 3pm", refDate)
+        assertEquals("Coffee", event.title)
+        assertEquals(LocalDate.of(2025, 1, 13), event.startDate)
+        assertEquals(LocalTime.of(15, 0), event.startTime)
+    }
+
+    @Test
+    fun `abbreviated day with next prefix — next Tue`() {
+        val event = NaturalLanguageParser.parse("Dentist next Tue at 2pm", refDate)
+        assertEquals(LocalDate.of(2025, 1, 14), event.startDate)
+        assertEquals(LocalTime.of(14, 0), event.startTime)
+    }
+
+    @Test
+    fun `abbreviated day with on prefix — on Wed`() {
+        val event = NaturalLanguageParser.parse("Lunch on Wed", refDate)
+        assertEquals(LocalDate.of(2025, 1, 15), event.startDate)
+        assertTrue(event.isAllDay)
+    }
+
+    @Test
+    fun `abbreviated day Thu resolves correctly`() {
+        val event = NaturalLanguageParser.parse("Standup Thu 5pm", refDate)
+        assertEquals(LocalDate.of(2025, 1, 16), event.startDate)
+        assertEquals(LocalTime.of(17, 0), event.startTime)
+    }
+
+    @Test
+    fun `abbreviated day Fri resolves to same day when today matches`() {
+        // refDate is already a Friday
+        val event = NaturalLanguageParser.parse("Gym Fri at noon", refDate)
+        assertEquals(refDate, event.startDate)
+        assertEquals(LocalTime.of(12, 0), event.startTime)
+    }
+
+    @Test
+    fun `abbreviated day Sat resolves to next Saturday`() {
+        val event = NaturalLanguageParser.parse("Hike Sat 9am", refDate)
+        assertEquals(LocalDate.of(2025, 1, 11), event.startDate)
+        assertEquals(LocalTime.of(9, 0), event.startTime)
+    }
+
+    @Test
+    fun `abbreviated day Sun resolves to next Sunday`() {
+        val event = NaturalLanguageParser.parse("Brunch Sun 10am", refDate)
+        assertEquals(LocalDate.of(2025, 1, 12), event.startDate)
+        assertEquals(LocalTime.of(10, 0), event.startTime)
+    }
+
+    @Test
+    fun `multi-letter abbreviation Thurs resolves correctly`() {
+        val event = NaturalLanguageParser.parse("Call Thurs at 4pm", refDate)
+        assertEquals(LocalDate.of(2025, 1, 16), event.startDate)
+        assertEquals(LocalTime.of(16, 0), event.startTime)
+    }
+
+    @Test
+    fun `multi-letter abbreviation Tues resolves correctly`() {
+        val event = NaturalLanguageParser.parse("Meeting Tues 11am", refDate)
+        assertEquals(LocalDate.of(2025, 1, 14), event.startDate)
+        assertEquals(LocalTime.of(11, 0), event.startTime)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // "for an hour" / "for a hour" duration
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `for an hour produces correct end time and clean title`() {
+        val event = NaturalLanguageParser.parse("Meeting at 3pm for an hour", refDate)
+        assertEquals("Meeting", event.title)
+        assertEquals(LocalTime.of(15, 0), event.startTime)
+        assertEquals(LocalTime.of(16, 0), event.endTime)
+    }
+
+    @Test
+    fun `for a hour produces correct end time`() {
+        val event = NaturalLanguageParser.parse("Call at 10am for a hour", refDate)
+        assertEquals(LocalTime.of(10, 0), event.startTime)
+        assertEquals(LocalTime.of(11, 0), event.endTime)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // o'clock with AM/PM
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `o'clock with pm suffix resolves to afternoon`() {
+        val event = NaturalLanguageParser.parse("Meeting at 3 o'clock pm tomorrow", refDate)
+        assertEquals(LocalTime.of(15, 0), event.startTime)
+    }
+
+    @Test
+    fun `o'clock with am suffix stays in morning`() {
+        val event = NaturalLanguageParser.parse("Run at 6 o'clock am", refDate)
+        assertEquals(LocalTime.of(6, 0), event.startTime)
+    }
+
+    @Test
+    fun `o'clock with pm suffix at 11 resolves to 23 00`() {
+        val event = NaturalLanguageParser.parse("Party at 11 o'clock pm tomorrow", refDate)
+        assertEquals(LocalTime.of(23, 0), event.startTime)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // "half past X" times
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `half past with pm resolves to correct afternoon time`() {
+        val event = NaturalLanguageParser.parse("Lunch at half past 1pm", refDate)
+        assertEquals(LocalTime.of(13, 30), event.startTime)
+    }
+
+    @Test
+    fun `half past with am resolves to correct morning time`() {
+        val event = NaturalLanguageParser.parse("Call at half past 10am", refDate)
+        assertEquals(LocalTime.of(10, 30), event.startTime)
+    }
+
+    @Test
+    fun `half past without meridiem uses raw hour`() {
+        val event = NaturalLanguageParser.parse("Meeting at half past 9 tomorrow", refDate)
+        assertEquals(LocalTime.of(9, 30), event.startTime)
+    }
+
+    @Test
+    fun `half past combined with duration`() {
+        val event = NaturalLanguageParser.parse("Standup at half past 9am for 30 minutes", refDate)
+        assertEquals(LocalTime.of(9, 30), event.startTime)
+        assertEquals(LocalTime.of(10, 0), event.endTime)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // "quarter past / quarter to X" times
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `quarter past resolves to X 15`() {
+        val event = NaturalLanguageParser.parse("Doctor at quarter past 9am", refDate)
+        assertEquals(LocalTime.of(9, 15), event.startTime)
+    }
+
+    @Test
+    fun `quarter past pm resolves to afternoon`() {
+        val event = NaturalLanguageParser.parse("Lunch at quarter past 12pm", refDate)
+        assertEquals(LocalTime.of(12, 15), event.startTime)
+    }
+
+    @Test
+    fun `quarter to resolves to previous hour 45`() {
+        val event = NaturalLanguageParser.parse("Train at quarter to 5pm tomorrow", refDate)
+        assertEquals(LocalTime.of(16, 45), event.startTime)
+    }
+
+    @Test
+    fun `quarter to 12pm resolves to 11 45`() {
+        val event = NaturalLanguageParser.parse("Lunch at quarter to 12pm", refDate)
+        assertEquals(LocalTime.of(11, 45), event.startTime)
+    }
+
+    @Test
+    fun `quarter to without meridiem uses raw hour minus 1`() {
+        val event = NaturalLanguageParser.parse("Meeting at quarter to 10 tomorrow", refDate)
+        assertEquals(LocalTime.of(9, 45), event.startTime)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Decimal hour durations
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `for 1 point 5 hours produces 90 minute duration`() {
+        val event = NaturalLanguageParser.parse("Workshop at 2pm for 1.5 hours", refDate)
+        assertEquals("Workshop", event.title)
+        assertEquals(LocalTime.of(14, 0), event.startTime)
+        assertEquals(LocalTime.of(15, 30), event.endTime)
+    }
+
+    @Test
+    fun `for 2 point 5 hours produces 150 minute duration`() {
+        val event = NaturalLanguageParser.parse("Training at 9am for 2.5 hours", refDate)
+        assertEquals(LocalTime.of(9, 0), event.startTime)
+        assertEquals(LocalTime.of(11, 30), event.endTime)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Ordinal-first date format: "15th of January", "3rd March 2025"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `ordinal-first date with of preposition`() {
+        val event = NaturalLanguageParser.parse("Party 15th of January at 3pm", refDate)
+        assertEquals("Party", event.title)
+        assertEquals(LocalDate.of(2025, 1, 15), event.startDate)
+        assertEquals(LocalTime.of(15, 0), event.startTime)
+    }
+
+    @Test
+    fun `ordinal-first date without of preposition`() {
+        val event = NaturalLanguageParser.parse("Concert 3rd March at noon", refDate)
+        assertEquals(LocalDate.of(2025, 3, 3), event.startDate)
+        assertEquals(LocalTime.of(12, 0), event.startTime)
+    }
+
+    @Test
+    fun `ordinal-first date with explicit year`() {
+        val event = NaturalLanguageParser.parse("Wedding 21st June 2026", refDate)
+        assertEquals("Wedding", event.title)
+        assertEquals(LocalDate.of(2026, 6, 21), event.startDate)
+        assertTrue(event.isAllDay)
+    }
+
+    @Test
+    fun `ordinal-first date rolls to next year when past`() {
+        // refDate = Jan 10 2025; 5th of January is before refDate → 2026
+        val event = NaturalLanguageParser.parse("Anniversary 5th of January", refDate)
+        assertEquals(LocalDate.of(2026, 1, 5), event.startDate)
+    }
 }
