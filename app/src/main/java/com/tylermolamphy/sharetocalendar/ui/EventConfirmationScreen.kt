@@ -87,6 +87,9 @@ fun EventConfirmationScreen(
     var showStartTimePicker by remember { mutableStateOf(false) }
     var showEndTimePicker by remember { mutableStateOf(false) }
 
+    // Inline time validation error
+    var timeError by remember { mutableStateOf<String?>(null) }
+
     // Title field value — tracks text + cursor/selection independently of ViewModel string
     var titleFieldValue by remember { mutableStateOf(TextFieldValue("")) }
 
@@ -169,7 +172,15 @@ fun EventConfirmationScreen(
             initialMinute = st.minute,
             onDismiss = { showStartTimePicker = false },
             onConfirm = { hour, minute ->
-                viewModel.updateEvent(event.copy(startTime = LocalTime.of(hour, minute)))
+                val newStart = LocalTime.of(hour, minute)
+                viewModel.updateEvent(event.copy(startTime = newStart))
+                // Revalidate end time against the new start
+                val currentEndTime = event.endTime
+                timeError = if (currentEndTime != null && !currentEndTime.isAfter(newStart)) {
+                    "End time must be after start time"
+                } else {
+                    null
+                }
                 showStartTimePicker = false
             }
         )
@@ -183,7 +194,15 @@ fun EventConfirmationScreen(
             initialMinute = et.minute,
             onDismiss = { showEndTimePicker = false },
             onConfirm = { hour, minute ->
-                viewModel.updateEvent(event.copy(endTime = LocalTime.of(hour, minute)))
+                val newEnd = LocalTime.of(hour, minute)
+                viewModel.updateEvent(event.copy(endTime = newEnd))
+                // Validate end against current start
+                val currentStartTime = event.startTime
+                timeError = if (currentStartTime != null && !newEnd.isAfter(currentStartTime)) {
+                    "End time must be after start time"
+                } else {
+                    null
+                }
                 showEndTimePicker = false
             }
         )
@@ -266,6 +285,7 @@ fun EventConfirmationScreen(
                                 endTime = if (it) null else event.endTime ?: LocalTime.of(10, 0)
                             )
                         )
+                        if (it) timeError = null
                     }
                 )
             }
@@ -291,43 +311,54 @@ fun EventConfirmationScreen(
 
             // Start / End time (only if not all-day) — opens M3 TimePickerDialog
             if (!event.isAllDay) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        OutlinedTextField(
-                            value = event.startTime?.format(timeFormatter) ?: "",
-                            onValueChange = {},
-                            label = { Text("Start") },
-                            modifier = Modifier.fillMaxWidth(),
-                            readOnly = true,
-                            trailingIcon = {
-                                Icon(Icons.Default.Edit, contentDescription = "Pick start time")
-                            }
-                        )
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .clickable { showStartTimePicker = true }
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedTextField(
+                                value = event.startTime?.format(timeFormatter) ?: "",
+                                onValueChange = {},
+                                label = { Text("Start") },
+                                modifier = Modifier.fillMaxWidth(),
+                                readOnly = true,
+                                trailingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = "Pick start time")
+                                }
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { showStartTimePicker = true }
+                            )
+                        }
 
-                    Box(modifier = Modifier.weight(1f)) {
-                        OutlinedTextField(
-                            value = event.endTime?.format(timeFormatter) ?: "",
-                            onValueChange = {},
-                            label = { Text("End") },
-                            modifier = Modifier.fillMaxWidth(),
-                            readOnly = true,
-                            trailingIcon = {
-                                Icon(Icons.Default.Edit, contentDescription = "Pick end time")
-                            }
-                        )
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .clickable { showEndTimePicker = true }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedTextField(
+                                value = event.endTime?.format(timeFormatter) ?: "",
+                                onValueChange = {},
+                                label = { Text("End") },
+                                modifier = Modifier.fillMaxWidth(),
+                                readOnly = true,
+                                isError = timeError != null,
+                                trailingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = "Pick end time")
+                                }
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { showEndTimePicker = true }
+                            )
+                        }
+                    }
+                    if (timeError != null) {
+                        Text(
+                            text = timeError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 4.dp)
                         )
                     }
                 }
