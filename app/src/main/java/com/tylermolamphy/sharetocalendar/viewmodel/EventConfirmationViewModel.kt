@@ -7,6 +7,7 @@ import com.tylermolamphy.sharetocalendar.data.CalendarRepository
 import com.tylermolamphy.sharetocalendar.data.PreferencesRepository
 import com.tylermolamphy.sharetocalendar.model.CalendarEvent
 import com.tylermolamphy.sharetocalendar.parser.NaturalLanguageParser
+import com.tylermolamphy.sharetocalendar.validation.InputValidation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,19 +37,9 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
             NaturalLanguageParser.parse(text)
         }
         _event.value = parsed.copy(
-            title = shortenTitle(parsed.title),
+            title = InputValidation.shortenParsedTitle(parsed.title),
             description = text
         )
-    }
-
-    private fun shortenTitle(title: String): String {
-        if (title.length <= 50) return title
-        // Take first sentence (split on . ! ?)
-        val firstSentence = title.split(Regex("[.!?]"), limit = 2).first().trim()
-        if (firstSentence.length <= 50) return firstSentence
-        // Still too long — truncate at word boundary + ellipsis
-        val truncated = firstSentence.take(47).substringBeforeLast(' ')
-        return if (truncated.isBlank()) title.take(50) else "$truncated…"
     }
 
     fun updateEvent(event: CalendarEvent) {
@@ -65,18 +56,17 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
                 _saveResult.value = SaveResult.Error("No calendar selected. Please select a calendar in Settings.")
                 return@launch
             }
-            val currentEvent = _event.value.copy(
-                title = _event.value.title.trim(),
-                location = _event.value.location.trim()
-            )
-            if (currentEvent.title.isBlank()) {
+            val sanitizedTitle = InputValidation.sanitizeTitle(_event.value.title)
+            if (sanitizedTitle == null) {
                 _saveResult.value = SaveResult.Error("Event title cannot be empty.")
                 return@launch
             }
+            val currentEvent = _event.value.copy(
+                title = sanitizedTitle,
+                location = InputValidation.sanitizeLocation(_event.value.location)
+            )
             if (!currentEvent.isAllDay &&
-                currentEvent.startTime != null &&
-                currentEvent.endTime != null &&
-                !currentEvent.endTime.isAfter(currentEvent.startTime)
+                !InputValidation.isValidTimeRange(currentEvent.startTime, currentEvent.endTime)
             ) {
                 _saveResult.value = SaveResult.Error("End time must be after start time.")
                 return@launch

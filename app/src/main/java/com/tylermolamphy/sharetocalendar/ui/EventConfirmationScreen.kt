@@ -56,6 +56,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tylermolamphy.sharetocalendar.validation.InputValidation
 import com.tylermolamphy.sharetocalendar.viewmodel.EventConfirmationViewModel
 import java.time.Instant
 import java.time.LocalDate
@@ -256,7 +257,7 @@ fun EventConfirmationScreen(
             OutlinedTextField(
                 value = titleFieldValue,
                 onValueChange = { newValue ->
-                    if (newValue.text.length <= 150) {
+                    if (InputValidation.isTitleLengthValid(newValue.text)) {
                         titleFieldValue = newValue
                         viewModel.updateEvent(event.copy(title = newValue.text))
                     }
@@ -369,7 +370,7 @@ fun EventConfirmationScreen(
             // Location
             OutlinedTextField(
                 value = event.location,
-                onValueChange = { if (it.length <= 200) viewModel.updateEvent(event.copy(location = it)) },
+                onValueChange = { if (InputValidation.isLocationLengthValid(it)) viewModel.updateEvent(event.copy(location = it)) },
                 label = { Text("Location") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -382,7 +383,7 @@ fun EventConfirmationScreen(
             Column {
                 OutlinedTextField(
                     value = event.description,
-                    onValueChange = { if (it.length <= 1000) viewModel.updateEvent(event.copy(description = it)) },
+                    onValueChange = { if (InputValidation.isDescriptionLengthValid(it)) viewModel.updateEvent(event.copy(description = it)) },
                     label = { Text("Description") },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -391,9 +392,9 @@ fun EventConfirmationScreen(
                     maxLines = 5
                 )
                 Text(
-                    text = "${event.description.length} / 1000",
+                    text = "${event.description.length} / ${InputValidation.MAX_DESCRIPTION_LENGTH}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (event.description.length >= 1000) MaterialTheme.colorScheme.error
+                    color = if (event.description.length >= InputValidation.MAX_DESCRIPTION_LENGTH) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.End)
                 )
