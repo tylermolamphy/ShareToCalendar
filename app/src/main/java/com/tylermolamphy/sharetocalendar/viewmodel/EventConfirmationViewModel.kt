@@ -47,7 +47,8 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
         val firstSentence = title.split(Regex("[.!?]"), limit = 2).first().trim()
         if (firstSentence.length <= 50) return firstSentence
         // Still too long — truncate at word boundary + ellipsis
-        return firstSentence.take(47).substringBeforeLast(' ') + "…"
+        val truncated = firstSentence.take(47).substringBeforeLast(' ')
+        return if (truncated.isBlank()) title.take(50) else "$truncated…"
     }
 
     fun updateEvent(event: CalendarEvent) {
@@ -64,7 +65,10 @@ class EventConfirmationViewModel(application: Application) : AndroidViewModel(ap
                 _saveResult.value = SaveResult.Error("No calendar selected. Please select a calendar in Settings.")
                 return@launch
             }
-            val currentEvent = _event.value
+            val currentEvent = _event.value.copy(
+                title = _event.value.title.trim(),
+                location = _event.value.location.trim()
+            )
             if (currentEvent.title.isBlank()) {
                 _saveResult.value = SaveResult.Error("Event title cannot be empty.")
                 return@launch

@@ -256,8 +256,10 @@ fun EventConfirmationScreen(
             OutlinedTextField(
                 value = titleFieldValue,
                 onValueChange = { newValue ->
-                    titleFieldValue = newValue
-                    viewModel.updateEvent(event.copy(title = newValue.text))
+                    if (newValue.text.length <= 150) {
+                        titleFieldValue = newValue
+                        viewModel.updateEvent(event.copy(title = newValue.text))
+                    }
                 },
                 label = { Text("Title") },
                 modifier = Modifier
@@ -367,7 +369,7 @@ fun EventConfirmationScreen(
             // Location
             OutlinedTextField(
                 value = event.location,
-                onValueChange = { viewModel.updateEvent(event.copy(location = it)) },
+                onValueChange = { if (it.length <= 200) viewModel.updateEvent(event.copy(location = it)) },
                 label = { Text("Location") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -377,16 +379,25 @@ fun EventConfirmationScreen(
             )
 
             // Description
-            OutlinedTextField(
-                value = event.description,
-                onValueChange = { viewModel.updateEvent(event.copy(description = it)) },
-                label = { Text("Description") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(120.dp)
-                    .testTag("descriptionField"),
-                maxLines = 5
-            )
+            Column {
+                OutlinedTextField(
+                    value = event.description,
+                    onValueChange = { if (it.length <= 1000) viewModel.updateEvent(event.copy(description = it)) },
+                    label = { Text("Description") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .testTag("descriptionField"),
+                    maxLines = 5
+                )
+                Text(
+                    text = "${event.description.length} / 1000",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (event.description.length >= 1000) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.End)
+                )
+            }
 
         }
     }
