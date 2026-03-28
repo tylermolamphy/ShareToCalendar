@@ -56,6 +56,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tylermolamphy.sharetocalendar.validation.InputValidation
 import com.tylermolamphy.sharetocalendar.viewmodel.EventConfirmationViewModel
 import java.time.Instant
 import java.time.LocalDate
@@ -256,8 +257,10 @@ fun EventConfirmationScreen(
             OutlinedTextField(
                 value = titleFieldValue,
                 onValueChange = { newValue ->
-                    titleFieldValue = newValue
-                    viewModel.updateEvent(event.copy(title = newValue.text))
+                    if (InputValidation.isTitleLengthValid(newValue.text)) {
+                        titleFieldValue = newValue
+                        viewModel.updateEvent(event.copy(title = newValue.text))
+                    }
                 },
                 label = { Text("Title") },
                 modifier = Modifier
@@ -367,7 +370,7 @@ fun EventConfirmationScreen(
             // Location
             OutlinedTextField(
                 value = event.location,
-                onValueChange = { viewModel.updateEvent(event.copy(location = it)) },
+                onValueChange = { if (InputValidation.isLocationLengthValid(it)) viewModel.updateEvent(event.copy(location = it)) },
                 label = { Text("Location") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -377,16 +380,25 @@ fun EventConfirmationScreen(
             )
 
             // Description
-            OutlinedTextField(
-                value = event.description,
-                onValueChange = { viewModel.updateEvent(event.copy(description = it)) },
-                label = { Text("Description") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(120.dp)
-                    .testTag("descriptionField"),
-                maxLines = 5
-            )
+            Column {
+                OutlinedTextField(
+                    value = event.description,
+                    onValueChange = { if (InputValidation.isDescriptionLengthValid(it)) viewModel.updateEvent(event.copy(description = it)) },
+                    label = { Text("Description") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .testTag("descriptionField"),
+                    maxLines = 5
+                )
+                Text(
+                    text = "${event.description.length} / ${InputValidation.MAX_DESCRIPTION_LENGTH}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (event.description.length >= InputValidation.MAX_DESCRIPTION_LENGTH) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.End)
+                )
+            }
 
         }
     }
